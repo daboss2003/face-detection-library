@@ -22,5 +22,6 @@ Production-ready, on-device liveness detection using **MediaPipe Face Landmarker
 - iOS: integrate `MediaPipeTasksVision` and `face_landmarker.task`, then build the framework and use it in `demo-apps/ios/`.
 - Capacitor: install `@daboss/liveness-capacitor`.
 - React Native / Expo 54: install `@daboss/liveness-react-native` and add the Expo config plugin.
+- Web (Capacitor web layer / browser): install `@daboss/liveness-web`.
 
 See `docs/README.md` for full details, thresholds, and usage.

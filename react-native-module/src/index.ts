@@ -1,6 +1,7 @@
 import { NativeEventEmitter } from "react-native";
 import NativeLivenessDetection from "./NativeLivenessDetection";
 import type { LivenessChallengeEvent, LivenessFailureEvent, LivenessResult, LivenessStartOptions } from "./NativeLivenessDetection";
+export { LivenessWebView } from "./LivenessWebView";
 
 const emitter = new NativeEventEmitter(NativeLivenessDetection);
 

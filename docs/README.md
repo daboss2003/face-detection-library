@@ -139,6 +139,37 @@ The plugin runs inside the **same Activity** hosting the WebView and adds a nati
 
 ---
 
+## Web SDK (browser + Capacitor)
+
+Package: `@daboss/liveness-web`
+
+**Install**
+```
+npm install @daboss/liveness-web
+```
+
+**Usage (Capacitor web layer)**
+```ts
+import { startLiveness } from "@daboss/liveness-web";
+
+const video = document.getElementById("video") as HTMLVideoElement;
+const canvas = document.getElementById("canvas") as HTMLCanvasElement;
+
+await startLiveness({
+  videoElement: video,
+  canvasElement: canvas,
+  callbacks: {
+    onChallengeChanged: (stepIndex, stepLabel) => console.log(stepIndex, stepLabel),
+    onFailure: (reason) => console.error(reason),
+    onSuccess: (imageBase64) => console.log(imageBase64)
+  }
+});
+```
+
+The web SDK loads MediaPipe Tasks Vision from CDN by default.
+
+---
+
 ## React Native (TurboModule, Expo 54)
 
 Package: `@daboss/liveness-react-native`
@@ -187,6 +218,24 @@ console.log("Image base64 length:", result.imageBase64.length);
 sub1.remove();
 sub2.remove();
 ```
+
+---
+
+## React Native WebView (lightweight)
+
+Use the bundled WebView component that runs the **web SDK** and posts messages.
+
+```tsx
+import { LivenessWebView } from "@daboss/liveness-react-native";
+
+<LivenessWebView
+  onChallengeChanged={(e) => console.log(e.stepLabel)}
+  onFailure={(e) => console.log(e.reason)}
+  onLivenessPassed={(e) => console.log(e.imageBase64)}
+/>;
+```
+
+Requires `react-native-webview` and camera permissions. The WebView uses CDN assets and posts `challengeChanged`, `failure`, and `livenessPassed` messages.
 
 ---
 

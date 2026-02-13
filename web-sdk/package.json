@@ -1,0 +1,38 @@
+{
+  "name": "@daboss/liveness-web",
+  "version": "0.1.0",
+  "description": "Web liveness detection using MediaPipe Face Landmarker (CDN)",
+  "keywords": [
+    "liveness",
+    "mediapipe",
+    "face",
+    "web"
+  ],
+  "type": "module",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist/",
+    "src/"
+  ],
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/daboss2003/face-detection-library.git"
+  },
+  "homepage": "https://github.com/daboss2003/face-detection-library",
+  "bugs": {
+    "url": "https://github.com/daboss2003/face-detection-library/issues"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepublishOnly": "npm run build"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
