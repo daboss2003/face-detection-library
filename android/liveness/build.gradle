@@ -31,9 +31,6 @@ android {
   }
 }
 
-project.ext.ASSET_DIR = projectDir.toString() + '/src/main/assets'
-apply from: 'download_tasks.gradle'
-
 dependencies {
   implementation 'androidx.core:core-ktx:1.13.1'
   implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.8.7'

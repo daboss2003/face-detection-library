@@ -194,8 +194,8 @@ sub2.remove();
 
 Use the official `face_landmarker.task` model.
 
-- **Android**: Either bundle via Gradle (`android/liveness/download_tasks.gradle`) or pass `modelUrl` to download at runtime.
-- **iOS**: Either bundle in the framework/app or pass `modelUrl` to download at runtime.
+- **Android**: Runtime download is the default. You can pass a custom `modelUrl` if needed.
+- **iOS**: Runtime download is the default. You can pass a custom `modelUrl` if needed.
 
 ---
 

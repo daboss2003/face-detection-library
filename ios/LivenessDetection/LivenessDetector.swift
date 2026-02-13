@@ -14,6 +14,8 @@ public extension LivenessDetectorDelegate {
 }
 
 @objc public final class LivenessDetector: NSObject {
+  private static let defaultModelUrl =
+    "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"
   private let config: LivenessConfig
   private weak var delegate: LivenessDetectorDelegate?
   private var stateMachine: LivenessStateMachine
@@ -41,7 +43,11 @@ public extension LivenessDetectorDelegate {
   private var modelPath: String?
 
   @objc public func startLiveness(previewView: UIView?, useFrontCamera: Bool = true) {
-    startInternal(previewView: previewView, useFrontCamera: useFrontCamera, modelPath: resolveModelPath())
+    if let localPath = modelPath, !localPath.isEmpty {
+      startInternal(previewView: previewView, useFrontCamera: useFrontCamera, modelPath: localPath)
+      return
+    }
+    startLiveness(previewView: previewView, useFrontCamera: useFrontCamera, modelUrl: Self.defaultModelUrl)
   }
 
   @objc public func startLiveness(previewView: UIView?, useFrontCamera: Bool = true, modelUrl: String) {
@@ -81,7 +87,7 @@ public extension LivenessDetectorDelegate {
 
     let path = modelPath ?? ""
     if path.isEmpty {
-      delegate?.onFailure(reason: "face_landmarker.task not found")
+      delegate?.onFailure(reason: "Model path required")
       return
     }
     pipeline.setup(modelPath: path)
@@ -123,12 +129,6 @@ public extension LivenessDetectorDelegate {
         self.stop()
       })
     }
-  }
-
-  private func resolveModelPath() -> String? {
-    if let provided = modelPath { return provided }
-    let bundle = Bundle(for: LivenessDetector.self)
-    return bundle.path(forResource: "face_landmarker", ofType: "task")
   }
 
   private func nowMilliseconds() -> Int64 {
