@@ -15,6 +15,8 @@ import com.getcapacitor.annotation.Permission
 import com.getcapacitor.annotation.PermissionCallback
 import com.liveness.detection.LivenessDetector
 import com.liveness.detection.LivenessListener
+import com.liveness.detection.ModelDownloader
+import com.liveness.detection.ModelSource
 
 @CapacitorPlugin(
   name = "LivenessDetector",
@@ -27,6 +29,7 @@ class LivenessDetectorPlugin : Plugin(), LivenessListener {
   private var pendingCall: PluginCall? = null
   private var overlayContainer: FrameLayout? = null
   private var previewView: PreviewView? = null
+  private var requestedModelUrl: String? = null
 
   @PluginMethod
   fun startLiveness(call: PluginCall) {
@@ -57,6 +60,12 @@ class LivenessDetectorPlugin : Plugin(), LivenessListener {
     stopInternal()
     pendingCall = call
 
+    val modelUrl = call.getString("modelUrl")
+    requestedModelUrl = modelUrl ?: ModelDownloader.DEFAULT_MODEL_URL
+    downloadModelFromUrl(requestedModelUrl!!, "face_landmarker.task")
+  }
+
+  private fun startDetectorWithModel(modelPath: String) {
     val activity = bridge.activity
     val root = activity.findViewById<ViewGroup>(android.R.id.content)
     val container = FrameLayout(activity)
@@ -76,8 +85,26 @@ class LivenessDetectorPlugin : Plugin(), LivenessListener {
     previewView = preview
 
     detector = LivenessDetector(activity, this).apply {
-      startLiveness(activity, preview, true)
+      startLiveness(activity, preview, true, ModelSource.FilePath(modelPath))
     }
+  }
+
+  private fun downloadModelFromUrl(url: String, fileName: String) {
+    ModelDownloader.downloadIfNeeded(
+      context = context,
+      url = url,
+      fileName = fileName,
+      onSuccess = { file ->
+        bridge.activity.runOnUiThread {
+          startDetectorWithModel(file.absolutePath)
+        }
+      },
+      onError = { error ->
+        bridge.activity.runOnUiThread {
+          onFailure(error)
+        }
+      }
+    )
   }
 
   private fun stopInternal() {
@@ -89,6 +116,7 @@ class LivenessDetectorPlugin : Plugin(), LivenessListener {
     }
     overlayContainer = null
     pendingCall = null
+    requestedModelUrl = null
   }
 
   override fun onChallengeChanged(stepIndex: Int, stepLabel: String) {

@@ -11,8 +11,12 @@ export type LivenessResult = {
   imageBase64: string;
 };
 
+export type LivenessStartOptions = {
+  modelUrl?: string;
+};
+
 export interface LivenessPlugin {
-  startLiveness(): Promise<LivenessResult>;
+  startLiveness(options?: LivenessStartOptions): Promise<LivenessResult>;
   stop(): Promise<void>;
   addListener(
     eventName: "challengeChanged",

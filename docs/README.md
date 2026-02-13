@@ -89,6 +89,20 @@ Recommended process:
 
 ---
 
+## Runtime model delivery (size reduction)
+
+To reduce install size, only the **model** is downloaded at runtime (~8–12 MB). The MediaPipe native runtime still ships with the app.
+
+**Android (runtime download)**  
+The model is downloaded via HTTPS on first use and cached locally. This works for **APK** and **Play Store** builds alike. Ensure the app has `INTERNET` permission.
+
+If you omit `modelUrl`, the native layer uses the default MediaPipe model URL.
+
+**iOS (model URL download)**  
+Call `startLiveness` with a **model URL**. The model downloads to cache and is reused on subsequent runs.
+
+---
+
 ## Capacitor integration (WebView, no new Activity)
 
 Package: `@daboss/liveness-capacitor`
@@ -110,7 +124,9 @@ const start = async () => {
     console.log("Failed:", event.reason);
   });
 
-  const result = await LivenessDetector.startLiveness();
+  const result = await LivenessDetector.startLiveness({
+    modelUrl: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"
+  });
   console.log("Image base64 length:", result.imageBase64.length);
 
   sub1.remove();
@@ -163,7 +179,9 @@ const sub2 = addFailureListener((event) => {
   console.log("Failed:", event.reason);
 });
 
-const result = await startLiveness();
+const result = await startLiveness({
+  modelUrl: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"
+});
 console.log("Image base64 length:", result.imageBase64.length);
 
 sub1.remove();
@@ -176,8 +194,8 @@ sub2.remove();
 
 Use the official `face_landmarker.task` model.
 
-- **Android**: Auto-downloaded via Gradle in `android/liveness/download_tasks.gradle`.
-- **iOS**: Add `face_landmarker.task` to the framework or app bundle (required for `LivenessDetector` to start).
+- **Android**: Either bundle via Gradle (`android/liveness/download_tasks.gradle`) or pass `modelUrl` to download at runtime.
+- **iOS**: Either bundle in the framework/app or pass `modelUrl` to download at runtime.
 
 ---
 

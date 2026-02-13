@@ -41,6 +41,28 @@ public extension LivenessDetectorDelegate {
   private var modelPath: String?
 
   @objc public func startLiveness(previewView: UIView?, useFrontCamera: Bool = true) {
+    startInternal(previewView: previewView, useFrontCamera: useFrontCamera, modelPath: resolveModelPath())
+  }
+
+  @objc public func startLiveness(previewView: UIView?, useFrontCamera: Bool = true, modelUrl: String) {
+    guard let url = URL(string: modelUrl) else {
+      delegate?.onFailure(reason: "Invalid model URL")
+      return
+    }
+    ModelDownloader.fetch(url: url) { [weak self] result in
+      DispatchQueue.main.async {
+        guard let self else { return }
+        switch result {
+        case .success(let fileUrl):
+          self.startInternal(previewView: previewView, useFrontCamera: useFrontCamera, modelPath: fileUrl.path)
+        case .failure(let error):
+          self.delegate?.onFailure(reason: "Model download failed: \(error.localizedDescription)")
+        }
+      }
+    }
+  }
+
+  private func startInternal(previewView: UIView?, useFrontCamera: Bool, modelPath: String?) {
     stop()
     let nowMs = nowMilliseconds()
     stateMachine.reset(nowMs: nowMs)
@@ -57,9 +79,9 @@ public extension LivenessDetectorDelegate {
     pipeline.delegate = self
     landmarker = pipeline
 
-    let path = resolveModelPath() ?? ""
+    let path = modelPath ?? ""
     if path.isEmpty {
-      delegate?.onFailure(reason: "face_landmarker.task not found in bundle")
+      delegate?.onFailure(reason: "face_landmarker.task not found")
       return
     }
     pipeline.setup(modelPath: path)

@@ -25,6 +25,7 @@ class LivenessDetector(
     lifecycleOwner: LifecycleOwner,
     previewView: PreviewView?,
     isFrontCamera: Boolean = true,
+    modelSource: ModelSource = ModelSource.Asset("face_landmarker.task"),
   ) {
     stop()
     val nowMs = System.currentTimeMillis()
@@ -34,7 +35,7 @@ class LivenessDetector(
       LivenessStep.ordered.first().label
     )
 
-    landmarker = FaceLandmarkerPipeline(context, config, this).apply { setup() }
+    landmarker = FaceLandmarkerPipeline(context, config, this).apply { setup(modelSource) }
 
     val analyzer = ImageAnalysis.Analyzer { imageProxy ->
       landmarker?.processImageProxy(imageProxy, isFrontCamera)

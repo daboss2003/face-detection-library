@@ -1,11 +1,11 @@
 import { NativeEventEmitter } from "react-native";
 import NativeLivenessDetection from "./NativeLivenessDetection";
-import type { LivenessChallengeEvent, LivenessFailureEvent, LivenessResult } from "./NativeLivenessDetection";
+import type { LivenessChallengeEvent, LivenessFailureEvent, LivenessResult, LivenessStartOptions } from "./NativeLivenessDetection";
 
 const emitter = new NativeEventEmitter(NativeLivenessDetection);
 
-export function startLiveness(): Promise<LivenessResult> {
-  return NativeLivenessDetection.startLiveness();
+export function startLiveness(options?: LivenessStartOptions): Promise<LivenessResult> {
+  return NativeLivenessDetection.startLiveness(options);
 }
 
 export function stop(): void {

@@ -17,7 +17,7 @@ RCT_EXPORT_MODULE(LivenessDetection)
   return @[@"challengeChanged", @"failure"];
 }
 
-- (void)startLiveness:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject {
+- (void)startLiveness:(NSDictionary *)options resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject {
   dispatch_async(dispatch_get_main_queue(), ^{
     self.pendingResolve = resolve;
     self.pendingReject = reject;
@@ -35,7 +35,11 @@ RCT_EXPORT_MODULE(LivenessDetection)
     self.overlayView = preview;
 
     self.detector = [[LivenessDetector alloc] initWithDelegate:self];
-    [self.detector startLivenessWithPreviewView:preview useFrontCamera:YES];
+    NSString *modelUrl = options[@"modelUrl"];
+    if (modelUrl == nil || modelUrl.length == 0) {
+      modelUrl = @"https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
+    }
+    [self.detector startLivenessWithPreviewView:preview useFrontCamera:YES modelUrl:modelUrl];
   });
 }
 

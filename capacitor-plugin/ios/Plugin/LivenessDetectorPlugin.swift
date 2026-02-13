@@ -10,15 +10,17 @@ public class LivenessDetectorPlugin: CAPPlugin, LivenessDetectorDelegate {
   private var overlayView: UIView?
 
   @objc func startLiveness(_ call: CAPPluginCall) {
+    let modelUrl = call.getString("modelUrl") ??
+      "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"
     let status = AVCaptureDevice.authorizationStatus(for: .video)
     switch status {
     case .authorized:
-      startInternal(call)
+      startInternal(call, modelUrl: modelUrl)
     case .notDetermined:
       AVCaptureDevice.requestAccess(for: .video) { granted in
         DispatchQueue.main.async {
           if granted {
-            self.startInternal(call)
+            self.startInternal(call, modelUrl: modelUrl)
           } else {
             call.reject("Camera permission denied")
           }
@@ -34,7 +36,7 @@ public class LivenessDetectorPlugin: CAPPlugin, LivenessDetectorDelegate {
     call.resolve()
   }
 
-  private func startInternal(_ call: CAPPluginCall) {
+  private func startInternal(_ call: CAPPluginCall, modelUrl: String?) {
     stopInternal()
     pendingCall = call
 
@@ -49,7 +51,11 @@ public class LivenessDetectorPlugin: CAPPlugin, LivenessDetectorDelegate {
     overlayView = preview
 
     detector = LivenessDetector(delegate: self)
-    detector?.startLiveness(previewView: preview, useFrontCamera: true)
+    if let modelUrl, !modelUrl.isEmpty {
+      detector?.startLiveness(previewView: preview, useFrontCamera: true, modelUrl: modelUrl)
+    } else {
+      detector?.startLiveness(previewView: preview, useFrontCamera: true)
+    }
   }
 
   private func stopInternal() {

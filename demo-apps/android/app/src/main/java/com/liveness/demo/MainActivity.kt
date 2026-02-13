@@ -10,6 +10,8 @@ import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import com.liveness.detection.LivenessDetector
 import com.liveness.detection.LivenessListener
+import com.liveness.detection.ModelDownloader
+import com.liveness.detection.ModelSource
 
 class MainActivity : AppCompatActivity(), LivenessListener {
   private lateinit var previewView: PreviewView
@@ -18,11 +20,13 @@ class MainActivity : AppCompatActivity(), LivenessListener {
   private lateinit var statusText: TextView
 
   private var detector: LivenessDetector? = null
+  private val modelFileName = "face_landmarker.task"
+  private val modelUrl = ModelDownloader.DEFAULT_MODEL_URL
 
   private val permissionLauncher = registerForActivityResult(
     ActivityResultContracts.RequestPermission()
   ) { granted ->
-    if (granted) startDetector() else updateStatus("Camera permission required")
+    if (granted) startModelDownload() else updateStatus("Camera permission required")
   }
 
   override fun onCreate(savedInstanceState: Bundle?) {
@@ -37,7 +41,7 @@ class MainActivity : AppCompatActivity(), LivenessListener {
   override fun onResume() {
     super.onResume()
     if (hasCameraPermission()) {
-      startDetector()
+      startModelDownload()
     } else {
       permissionLauncher.launch(Manifest.permission.CAMERA)
     }
@@ -49,12 +53,36 @@ class MainActivity : AppCompatActivity(), LivenessListener {
     super.onPause()
   }
 
-  private fun startDetector() {
+  private fun startModelDownload() {
+    downloadModelFromUrl()
+  }
+
+  private fun startDetector(modelPath: String) {
     detector?.stop()
     detector = LivenessDetector(this, this).apply {
-      startLiveness(this@MainActivity, previewView, true)
+      startLiveness(
+        this@MainActivity,
+        previewView,
+        true,
+        ModelSource.FilePath(modelPath)
+      )
     }
     updateStatus("Running")
+  }
+
+  private fun downloadModelFromUrl() {
+    runOnUiThread { updateStatus("Downloading model (HTTP)...") }
+    ModelDownloader.downloadIfNeeded(
+      context = this,
+      url = modelUrl,
+      fileName = modelFileName,
+      onSuccess = { file ->
+        runOnUiThread { startDetector(file.absolutePath) }
+      },
+      onError = { error ->
+        runOnUiThread { updateStatus(error) }
+      }
+    )
   }
 
   private fun hasCameraPermission(): Boolean {

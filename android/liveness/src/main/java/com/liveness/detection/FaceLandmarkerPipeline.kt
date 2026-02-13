@@ -26,11 +26,24 @@ class FaceLandmarkerPipeline(
     fun onError(message: String)
   }
 
-  fun setup() {
-    val baseOptions = BaseOptions.builder()
-      .setModelAssetPath(MODEL_ASSET)
+  fun setup(modelSource: ModelSource = ModelSource.Asset(MODEL_ASSET)) {
+    val baseOptionsBuilder = BaseOptions.builder()
       .setDelegate(Delegate.CPU)
-      .build()
+
+    when (modelSource) {
+      is ModelSource.Asset -> baseOptionsBuilder.setModelAssetPath(modelSource.assetPath)
+      is ModelSource.FilePath -> {
+        val buffer = try {
+          ModelSourceReader.readFileAsByteBuffer(modelSource.filePath)
+        } catch (e: Exception) {
+          listener.onError("Model file read failed: ${e.message}")
+          return
+        }
+        baseOptionsBuilder.setModelAssetBuffer(buffer)
+      }
+    }
+
+    val baseOptions = baseOptionsBuilder.build()
 
     val options = FaceLandmarker.FaceLandmarkerOptions.builder()
       .setBaseOptions(baseOptions)

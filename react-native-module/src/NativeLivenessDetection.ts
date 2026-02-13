@@ -14,8 +14,12 @@ export type LivenessResult = {
   imageBase64: string;
 };
 
+export type LivenessStartOptions = {
+  modelUrl?: string;
+};
+
 export interface Spec extends TurboModule {
-  startLiveness(): Promise<LivenessResult>;
+  startLiveness(options?: LivenessStartOptions): Promise<LivenessResult>;
   stop(): void;
   addListener(eventName: "challengeChanged"): void;
   addListener(eventName: "failure"): void;

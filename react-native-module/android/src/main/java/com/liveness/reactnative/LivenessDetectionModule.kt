@@ -4,12 +4,15 @@ import android.util.Base64
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.camera.view.PreviewView
+import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.liveness.detection.LivenessDetector
 import com.liveness.detection.LivenessListener
+import com.liveness.detection.ModelDownloader
+import com.liveness.detection.ModelSource
 
 class LivenessDetectionModule(
   private val reactContext: ReactApplicationContext
@@ -18,17 +21,22 @@ class LivenessDetectionModule(
   private var pendingPromise: Promise? = null
   private var overlayContainer: FrameLayout? = null
   private var previewView: PreviewView? = null
+  private var requestedModelUrl: String? = null
 
   override fun getName(): String = NAME
 
   @ReactMethod
-  override fun startLiveness(promise: Promise) {
+  override fun startLiveness(options: ReadableMap?, promise: Promise) {
     val activity = currentActivity ?: run {
       promise.reject("NO_ACTIVITY", "Activity not available")
       return
     }
     pendingPromise = promise
     stopInternal()
+
+    val modelUrl = options?.getString("modelUrl")
+    requestedModelUrl = modelUrl ?: ModelDownloader.DEFAULT_MODEL_URL
+    downloadModelFromUrl(requestedModelUrl!!, "face_landmarker.task")
 
     val root = activity.findViewById<ViewGroup>(android.R.id.content)
     val container = FrameLayout(activity)
@@ -66,6 +74,49 @@ class LivenessDetectionModule(
     }
     overlayContainer = null
     pendingPromise = null
+    requestedModelUrl = null
+  }
+
+  private fun startDetectorWithModel(modelPath: String) {
+    val activity = currentActivity ?: return
+    val root = activity.findViewById<ViewGroup>(android.R.id.content)
+    val container = FrameLayout(activity)
+    container.layoutParams = FrameLayout.LayoutParams(
+      ViewGroup.LayoutParams.MATCH_PARENT,
+      ViewGroup.LayoutParams.MATCH_PARENT
+    )
+    val preview = PreviewView(activity)
+    preview.layoutParams = FrameLayout.LayoutParams(
+      ViewGroup.LayoutParams.MATCH_PARENT,
+      ViewGroup.LayoutParams.MATCH_PARENT
+    )
+    container.addView(preview)
+    root.addView(container)
+
+    overlayContainer = container
+    previewView = preview
+
+    detector = LivenessDetector(activity, this).apply {
+      startLiveness(activity, preview, true, ModelSource.FilePath(modelPath))
+    }
+  }
+
+  private fun downloadModelFromUrl(url: String, fileName: String) {
+    ModelDownloader.downloadIfNeeded(
+      context = reactContext,
+      url = url,
+      fileName = fileName,
+      onSuccess = { file ->
+        currentActivity?.runOnUiThread {
+          startDetectorWithModel(file.absolutePath)
+        }
+      },
+      onError = { error ->
+        currentActivity?.runOnUiThread {
+          onFailure(error)
+        }
+      }
+    )
   }
 
   override fun onChallengeChanged(stepIndex: Int, stepLabel: String) {
