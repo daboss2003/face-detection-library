@@ -1,0 +1,27 @@
+package com.liveness.detection
+
+data class LivenessConfig(
+  val yawLeftThreshold: Float = -15f,
+  val yawRightThreshold: Float = 15f,
+  val frontalYawThreshold: Float = 10f,
+  val frontalPitchThreshold: Float = 10f,
+  val blinkOpenThreshold: Float = 0.25f,
+  val blinkClosedThreshold: Float = 0.18f,
+  val blinkMaxDurationMs: Long = 1000L,
+  val blinkTimeoutMs: Long = 5000L,
+  val stepTimeoutMs: Long = 10000L,
+  val mouthTimeoutMs: Long = 5000L,
+  val mouthOpenThreshold: Float = 0.35f,
+  val nodDownThreshold: Float = 15f,
+  val nodUpThreshold: Float = -5f,
+  val nodTimeoutMs: Long = 10000L,
+  val maxYawDuringBlink: Float = 20f,
+  val maxPitchDuringBlink: Float = 20f,
+  val maxYawDuringNod: Float = 20f,
+  val maxYawDuringMouth: Float = 20f,
+  val maxPitchDuringMouth: Float = 20f,
+  val captureDelayMs: Long = 400L,
+  val faceDetectionConfidence: Float = 0.5f,
+  val facePresenceConfidence: Float = 0.5f,
+  val faceTrackingConfidence: Float = 0.5f,
+)

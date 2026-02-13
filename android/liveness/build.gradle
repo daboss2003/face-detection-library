@@ -1,0 +1,48 @@
+plugins {
+  id 'com.android.library'
+  id 'org.jetbrains.kotlin.android'
+  id 'de.undercouch.download'
+}
+
+android {
+  namespace 'com.liveness.detection'
+  compileSdk 34
+
+  defaultConfig {
+    minSdk 24
+    targetSdk 34
+    consumerProguardFiles "consumer-rules.pro"
+  }
+
+  buildTypes {
+    release {
+      minifyEnabled false
+      proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+    }
+  }
+
+  compileOptions {
+    sourceCompatibility JavaVersion.VERSION_1_8
+    targetCompatibility JavaVersion.VERSION_1_8
+  }
+
+  kotlinOptions {
+    jvmTarget = '1.8'
+  }
+}
+
+project.ext.ASSET_DIR = projectDir.toString() + '/src/main/assets'
+apply from: 'download_tasks.gradle'
+
+dependencies {
+  implementation 'androidx.core:core-ktx:1.13.1'
+  implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.8.7'
+
+  def camerax_version = '1.4.2'
+  implementation "androidx.camera:camera-core:$camerax_version"
+  implementation "androidx.camera:camera-camera2:$camerax_version"
+  implementation "androidx.camera:camera-lifecycle:$camerax_version"
+  implementation "androidx.camera:camera-view:$camerax_version"
+
+  implementation 'com.google.mediapipe:tasks-vision:0.10.29'
+}

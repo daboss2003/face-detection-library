@@ -1,0 +1,49 @@
+{
+  "name": "@daboss/liveness-react-native",
+  "version": "0.1.0",
+  "description": "React Native TurboModule for liveness detection (Expo 54 compatible)",
+  "main": "lib/commonjs/index.js",
+  "module": "lib/module/index.js",
+  "types": "lib/typescript/index.d.ts",
+  "files": [
+    "android/",
+    "ios/",
+    "src/",
+    "lib/",
+    "expo-plugin/",
+    "app.plugin.js"
+  ],
+  "keywords": [
+    "react-native",
+    "expo",
+    "liveness",
+    "mediapipe"
+  ],
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/daboss2003/face-detection-library.git"
+  },
+  "homepage": "https://github.com/daboss2003/face-detection-library",
+  "bugs": {
+    "url": "https://github.com/daboss2003/face-detection-library/issues"
+  },
+  "peerDependencies": {
+    "react": ">=18.0.0",
+    "react-native": ">=0.76.0"
+  },
+  "codegenConfig": {
+    "name": "LivenessDetectionSpec",
+    "type": "modules",
+    "jsSrcsDir": "src",
+    "android": {
+      "javaPackageName": "com.liveness.reactnative"
+    }
+  },
+  "expo": {
+    "plugin": "./app.plugin.js"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

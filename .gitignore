@@ -1,0 +1,40 @@
+.DS_Store
+.idea/
+.vscode/
+.cursor/
+*.log
+*.tmp
+
+# Node
+node_modules/
+dist/
+lib/
+*.tgz
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Android / Gradle
+.gradle/
+**/build/
+**/out/
+**/.cxx/
+local.properties
+*.iml
+
+# iOS / Xcode
+DerivedData/
+*.xcworkspace
+*.xcuserstate
+*.xcuserdata/
+*.xcarchive
+*.xcframework
+Pods/
+Podfile.lock
+build/
+
+# Expo
+.expo/
+android/app/build/
+ios/build/

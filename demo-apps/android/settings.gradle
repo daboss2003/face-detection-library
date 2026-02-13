@@ -1,0 +1,5 @@
+rootProject.name = "liveness-demo-android"
+
+include(":app")
+include(":liveness")
+project(":liveness").projectDir = file("../../android/liveness")

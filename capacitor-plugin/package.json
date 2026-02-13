@@ -1,0 +1,50 @@
+{
+  "name": "@daboss/liveness-capacitor",
+  "version": "0.1.0",
+  "description": "Capacitor liveness detection plugin (WebView, no new Activity)",
+  "main": "dist/plugin.cjs.js",
+  "module": "dist/esm/index.js",
+  "types": "dist/esm/index.d.ts",
+  "files": [
+    "dist/",
+    "android/",
+    "ios/",
+    "src/"
+  ],
+  "keywords": [
+    "capacitor",
+    "liveness",
+    "mediapipe",
+    "face"
+  ],
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/daboss2003/face-detection-library.git"
+  },
+  "homepage": "https://github.com/daboss2003/face-detection-library",
+  "bugs": {
+    "url": "https://github.com/daboss2003/face-detection-library/issues"
+  },
+  "peerDependencies": {
+    "@capacitor/core": "^5.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  },
+  "capacitor": {
+    "android": {
+      "src": "android"
+    },
+    "ios": {
+      "src": "ios"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepublishOnly": "npm run build"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
