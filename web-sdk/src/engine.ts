@@ -32,6 +32,70 @@ export const DEFAULT_MODEL_URL =
 export const DEFAULT_WASM_URL =
   "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm";
 
+/** Error code when CDN/assets are unavailable after retries (internet confirmed). */
+export const LIVENESS_ERROR_CDN_NOT_AVAILABLE = "cdnNotAvailable" as const;
+/** Error code when the user has no internet connection. */
+export const LIVENESS_ERROR_OFFLINE = "offline" as const;
+
+export function isCdnNotAvailableError(reason: string): boolean {
+  return reason === LIVENESS_ERROR_CDN_NOT_AVAILABLE;
+}
+export function isOfflineError(reason: string): boolean {
+  return reason === LIVENESS_ERROR_OFFLINE;
+}
+
+export class LivenessError extends Error {
+  constructor(
+    public readonly code: typeof LIVENESS_ERROR_CDN_NOT_AVAILABLE | typeof LIVENESS_ERROR_OFFLINE,
+    message: string
+  ) {
+    super(message);
+    this.name = "LivenessError";
+    Object.setPrototypeOf(this, LivenessError.prototype);
+  }
+}
+
+const CONNECTIVITY_CHECK_URL = "https://www.gstatic.com/generate_204";
+const CONNECTIVITY_CHECK_TIMEOUT_MS = 5000;
+const LOAD_ATTEMPT_TIMEOUT_MS = 45000;
+const MAX_CDN_RETRIES = 5;
+
+async function checkConnectivity(): Promise<boolean> {
+  if (typeof navigator !== "undefined" && !navigator.onLine) return false;
+  try {
+    const res = await fetch(CONNECTIVITY_CHECK_URL, {
+      method: "HEAD",
+      signal: AbortSignal.timeout(CONNECTIVITY_CHECK_TIMEOUT_MS),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+function isRetriableCdnError(error: unknown): boolean {
+  if (error instanceof TypeError) return true;
+  const msg = error instanceof Error ? error.message : String(error);
+  const lower = msg.toLowerCase();
+  const retriablePatterns = [
+    "fetch",
+    "network",
+    "wasm",
+    "webassembly",
+    "load",
+    "404",
+    "503",
+    "502",
+    "500",
+    "timeout",
+    "failed to load",
+  ];
+  if (retriablePatterns.some((p) => lower.includes(p))) return true;
+  const status = (error as { status?: number })?.status;
+  if (typeof status === "number" && [404, 502, 503, 500].includes(status)) return true;
+  return false;
+}
+
 type NormalizedLandmark  = { x: number; y: number; z: number };
 type BlendshapeCategory  = { categoryName: string; score: number };
 
@@ -299,7 +363,7 @@ export class LivenessEngine {
     }, config.sessionTimeoutMs);
     this.opts.callbacks?.onChallengeChanged?.(steps[0].index, steps[0].label);
     await this.ensureVideo();
-    this.landmarker = await this.createLandmarker();
+    this.landmarker = await createLandmarkerWithRetry(this.opts, MAX_CDN_RETRIES);
     this.loop();
   }
 
@@ -344,18 +408,10 @@ export class LivenessEngine {
   // ── Landmarker ─────────────────────────────────────────────────────────────
 
   private async createLandmarker(): Promise<FaceLandmarker> {
-    const module = await loadTasksVision();
-    const vision = await module.FilesetResolver.forVisionTasks(this.opts.wasmUrl ?? DEFAULT_WASM_URL);
-    return module.FaceLandmarker.createFromOptions(vision, {
-      baseOptions: {
-        modelAssetPath: this.opts.modelUrl ?? DEFAULT_MODEL_URL,
-        delegate: "GPU",
-      },
-      runningMode: "VIDEO",
-      numFaces: 2,
-      outputFaceBlendshapes: true,
-      outputFacialTransformationMatrixes: true,
-    });
+    return loadLandmarkerOnce(
+      this.opts.modelUrl ?? DEFAULT_MODEL_URL,
+      this.opts.wasmUrl ?? DEFAULT_WASM_URL
+    );
   }
 
   // ── Loop ───────────────────────────────────────────────────────────────────
@@ -775,4 +831,83 @@ function toDeg(r: number) { return (r * 180) / Math.PI; }
 
 async function loadTasksVision(): Promise<TasksVisionModule> {
   return (await import("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest")) as unknown as TasksVisionModule;
+}
+
+async function loadLandmarkerOnce(modelUrl: string, wasmUrl: string): Promise<FaceLandmarker> {
+  const module = await loadTasksVision();
+  const vision = await module.FilesetResolver.forVisionTasks(wasmUrl);
+  return module.FaceLandmarker.createFromOptions(vision, {
+    baseOptions: {
+      modelAssetPath: modelUrl,
+      delegate: "GPU",
+    },
+    runningMode: "VIDEO",
+    numFaces: 2,
+    outputFaceBlendshapes: true,
+    outputFacialTransformationMatrixes: true,
+  });
+}
+
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error("timeout")), ms);
+    p.then(
+      (v) => {
+        clearTimeout(t);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(t);
+        reject(e);
+      }
+    );
+  });
+}
+
+async function createLandmarkerWithRetry(
+  opts: LivenessOptions,
+  maxAttempts: number
+): Promise<FaceLandmarker> {
+  const modelUrl = opts.modelUrl ?? DEFAULT_MODEL_URL;
+  const wasmUrl = opts.wasmUrl ?? DEFAULT_WASM_URL;
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const landmarker = await withTimeout(
+        loadLandmarkerOnce(modelUrl, wasmUrl),
+        LOAD_ATTEMPT_TIMEOUT_MS
+      );
+      return landmarker;
+    } catch (err) {
+      lastError = err;
+      if (!isRetriableCdnError(err)) throw err;
+
+      if (attempt === 1) {
+        const online = await checkConnectivity();
+        if (!online) {
+          if (typeof console !== "undefined" && console.debug) {
+            console.debug("liveness: connectivity check failed (offline)");
+          }
+          throw new LivenessError(LIVENESS_ERROR_OFFLINE, "No internet connection");
+        }
+      }
+
+      if (attempt < maxAttempts) {
+        if (typeof console !== "undefined" && console.debug) {
+          console.debug(`liveness: cdn-retry attempt ${attempt + 1}/${maxAttempts}`);
+        }
+      } else {
+        if (typeof console !== "undefined" && console.debug) {
+          console.debug("liveness: cdnNotAvailable after max retries");
+        }
+        throw new LivenessError(
+          LIVENESS_ERROR_CDN_NOT_AVAILABLE,
+          "CDN not available. Please try again later."
+        );
+      }
+    }
+  }
+
+  throw lastError;
 }

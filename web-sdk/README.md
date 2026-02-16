@@ -41,6 +41,31 @@ import { stop } from "@daboss/liveness-web";
 stop();
 ```
 
+## Errors (CDN / connectivity)
+
+When CDN or connectivity fails, `onFailure` is called with a string you can compare to exported constants:
+
+- **`LIVENESS_ERROR_CDN_NOT_AVAILABLE`** (`"cdnNotAvailable"`) — CDN/assets unavailable after retries; internet was confirmed. Your app can fall back to a normal camera flow (e.g. capture without liveness).
+- **`LIVENESS_ERROR_OFFLINE`** (`"offline"`) — No internet connection (e.g. user is offline).
+
+Example:
+
+```ts
+import { startLiveness, LIVENESS_ERROR_CDN_NOT_AVAILABLE, isCdnNotAvailableError } from "@daboss/liveness-web";
+
+startLiveness({
+  callbacks: {
+    onFailure(reason) {
+      if (isCdnNotAvailableError(reason)) {
+        // Fall back to normal camera flow
+        return;
+      }
+      console.error(reason);
+    },
+  },
+});
+```
+
 ## Notes
 
 - Uses MediaPipe Tasks Vision Web from CDN.

@@ -2,7 +2,16 @@ import { LivenessEngine } from "./engine";
 import { startLivenessWithUI } from "./ui";
 
 export type { StartLivenessOptions } from "./ui";
-export { DEFAULT_MODEL_URL, DEFAULT_WASM_URL, LIVENESS_STEP_COUNT } from "./engine";
+export {
+  DEFAULT_MODEL_URL,
+  DEFAULT_WASM_URL,
+  LIVENESS_ERROR_CDN_NOT_AVAILABLE,
+  LIVENESS_ERROR_OFFLINE,
+  LIVENESS_STEP_COUNT,
+  isCdnNotAvailableError,
+  isOfflineError,
+  LivenessError,
+} from "./engine";
 export type { LivenessCallbacks, LivenessOptions, LivenessSoundOptions } from "./engine";
 export type { LivenessEngine } from "./engine";
 

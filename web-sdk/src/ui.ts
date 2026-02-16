@@ -1,4 +1,4 @@
-import { LivenessEngine, LIVENESS_STEP_COUNT, LivenessCallbacks, LivenessSoundOptions } from "./engine";
+import { LivenessEngine, LIVENESS_STEP_COUNT, LivenessCallbacks, LivenessSoundOptions, LivenessError } from "./engine";
 import { DEFAULT_SOUND_DATA_URLS } from "./default-sounds.generated";
 
 export type StartLivenessOptions = {
@@ -452,7 +452,13 @@ export function startLivenessWithUI(options: StartLivenessOptions): LivenessEngi
     () => {},
     (err) => {
       cleanup();
-      options.callbacks.onFailure?.(err instanceof Error ? err.message : String(err));
+      const reason =
+        err instanceof LivenessError
+          ? err.code
+          : err instanceof Error
+            ? err.message
+            : String(err);
+      options.callbacks.onFailure?.(reason);
     }
   );
 
