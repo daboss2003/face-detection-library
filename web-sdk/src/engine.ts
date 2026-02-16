@@ -117,6 +117,7 @@ export const LIVENESS_STEP_COUNT = steps.length;
 // ─────────────────────────────────────────────────────────────────────────────
 const config = {
   readyMs: 1800,   // ms to sample baseline before evaluating
+  sessionTimeoutMs: 120000,
 
   // ── Baseline sampling ──────────────────────────────────────────────────────
   // Number of frames averaged to produce the resting baseline per step
@@ -196,6 +197,9 @@ export class LivenessEngine {
   private lastDetectTs   = -1;
   private lastOvalState: boolean | null = null;
   private stepSoundPlayedForCurrentStep = false;
+  private currentStepAudio: HTMLAudioElement | null = null;
+  private currentStepAudioCleanup: (() => void) | null = null;
+  private sessionTimeoutId: number | null = null;
 
   constructor(private opts: LivenessOptions) {}
 
@@ -228,7 +232,41 @@ export class LivenessEngine {
     const key = STEP_LABEL_TO_SOUND[stepLabel];
     if (!key) return;
     const url = this.getSoundUrl(key);
-    if (url) this.playSound(url);
+    if (!url) return;
+    this.stopStepSound();
+    const a = new Audio(url);
+    const done = () => {
+      a.removeEventListener("ended", done);
+      a.removeEventListener("error", done);
+      if (this.currentStepAudio === a) this.currentStepAudio = null;
+      if (this.currentStepAudioCleanup === cleanup) this.currentStepAudioCleanup = null;
+    };
+    const cleanup = () => {
+      a.removeEventListener("ended", done);
+      a.removeEventListener("error", done);
+    };
+    this.currentStepAudio = a;
+    this.currentStepAudioCleanup = cleanup;
+    a.addEventListener("ended", done);
+    a.addEventListener("error", done);
+    a.play().catch(() => done());
+  }
+
+  private stopStepSound(): void {
+    if (this.currentStepAudio) {
+      this.currentStepAudio.pause();
+      this.currentStepAudio.currentTime = 0;
+    }
+    this.currentStepAudioCleanup?.();
+    this.currentStepAudioCleanup = null;
+    this.currentStepAudio = null;
+  }
+
+  private clearSessionTimeout(): void {
+    if (this.sessionTimeoutId != null) {
+      clearTimeout(this.sessionTimeoutId);
+      this.sessionTimeoutId = null;
+    }
   }
 
   private playGoodSound(onEnded?: () => void): void {
@@ -255,6 +293,10 @@ export class LivenessEngine {
     this.stepStart = now + config.readyMs;
     this.resetStepState();
     this.stepSoundPlayedForCurrentStep = false;
+    this.clearSessionTimeout();
+    this.sessionTimeoutId = setTimeout(() => {
+      if (this.running) this.fail("Timed out. Please try again.");
+    }, config.sessionTimeoutMs);
     this.opts.callbacks?.onChallengeChanged?.(steps[0].index, steps[0].label);
     await this.ensureVideo();
     this.landmarker = await this.createLandmarker();
@@ -269,6 +311,8 @@ export class LivenessEngine {
 
   private stopDetectionOnly(): void {
     this.running = false;
+    this.clearSessionTimeout();
+    this.stopStepSound();
     if (this.rafId != null) { cancelAnimationFrame(this.rafId); this.rafId = null; }
     if (this.landmarker)    { this.landmarker.close(); this.landmarker = null; }
   }
@@ -330,9 +374,14 @@ export class LivenessEngine {
       const metrics = extractMetrics(result);
       this.latestMetrics = metrics;
 
-      // ── Sample baseline during ready countdown ─────────────────────────────
-      const timeToStart = this.stepStart - now;
-      if (timeToStart > 0 && this.baselineYaw === null) {
+      const { inside, reason } = this.checkFaceInOval(metrics);
+      if (inside !== this.lastOvalState) {
+        this.lastOvalState = inside;
+        this.opts.callbacks?.onFaceInOval?.(inside, reason);
+      }
+
+      // ── Sample baseline (keep sampling until captured) ─────────────────────
+      if (this.baselineYaw === null && inside) {
         this.baselineSamples.push({ yaw: metrics.yaw, pitch: metrics.pitch });
         if (this.baselineSamples.length >= config.baselineFrames) {
           const yaws   = this.baselineSamples.map(s => s.yaw).sort((a, b) => a - b);
@@ -341,12 +390,6 @@ export class LivenessEngine {
           this.baselineYaw   = yaws[mid];
           this.baselinePitch = pitches[mid];
         }
-      }
-
-      const { inside, reason } = this.checkFaceInOval(metrics);
-      if (inside !== this.lastOvalState) {
-        this.lastOvalState = inside;
-        this.opts.callbacks?.onFaceInOval?.(inside, reason);
       }
 
       this.opts.callbacks?.onDebugFrame?.({
@@ -418,6 +461,7 @@ export class LivenessEngine {
 
   private updateState(metrics: Metrics, now: number): "passed" | "none" {
     if (now < this.stepStart) return "none"; // in ready countdown
+    if (this.baselineYaw === null || this.baselinePitch === null) return "none";
 
     const bYaw   = this.baselineYaw   ?? metrics.yaw;
     const bPitch = this.baselinePitch ?? metrics.pitch;
@@ -522,6 +566,7 @@ export class LivenessEngine {
   }
 
   private advanceStep(now: number): "passed" | "none" {
+    this.stopStepSound();
     this.stepIndex += 1;
     if (this.stepIndex >= steps.length) {
       this.playGoodSound();
@@ -529,7 +574,7 @@ export class LivenessEngine {
     }
     this.stepStart = now + config.readyMs;
     this.resetStepState();
-    this.stepSoundPlayedForCurrentStep = false;
+    this.stepSoundPlayedForCurrentStep = true;
     const step = steps[this.stepIndex];
     this.opts.callbacks?.onChallengeChanged?.(step.index, step.label);
     this.playGoodSound(() => this.playStepSound(step.label));
