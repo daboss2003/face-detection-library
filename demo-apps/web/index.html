@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+    <title>Liveness Demo (Web)</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <div id="overlay">Ready</div>
+      <video id="video" autoplay playsinline muted></video>
+      <canvas id="canvas"></canvas>
+      <div id="status">Click Start to begin liveness check.</div>
+      <button id="start" type="button">Start</button>
+      <button id="stop" type="button" disabled>Stop</button>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
