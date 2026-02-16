@@ -1,10 +1,12 @@
-import { LivenessEngine, LIVENESS_STEP_COUNT, LivenessCallbacks } from "./engine";
+import { LivenessEngine, LIVENESS_STEP_COUNT, LivenessCallbacks, LivenessSoundOptions } from "./engine";
+import { DEFAULT_SOUND_DATA_URLS } from "./default-sounds.generated";
 
 export type StartLivenessOptions = {
   container?: HTMLElement;
   modelUrl?: string;
   wasmUrl?: string;
   callbacks: LivenessCallbacks;
+  sounds?: LivenessSoundOptions;
 };
 
 // ── Oval dimensions — keep in sync with engine.ts config.ovalCx/Cy/Rx/Ry ──
@@ -417,11 +419,17 @@ export function startLivenessWithUI(options: StartLivenessOptions): LivenessEngi
   }
 
   // ── Engine ─────────────────────────────────────────────────────────────────
+  // Use options.sounds if provided; otherwise use embedded default sounds (works in any host)
+  const sounds: LivenessSoundOptions = options.sounds ?? {
+    ...(Object.keys(DEFAULT_SOUND_DATA_URLS).length > 0 ? DEFAULT_SOUND_DATA_URLS : { baseUrl: "audios/" }),
+  };
+
   const engine = new LivenessEngine({
     videoElement: video,
     canvasElement: canvas,
     modelUrl: options.modelUrl,
     wasmUrl: options.wasmUrl,
+    sounds,
     callbacks: {
       onChallengeChanged: (stepIndex, stepLabel) => {
         setProgress(stepIndex);

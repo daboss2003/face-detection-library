@@ -6,12 +6,24 @@ export type LivenessCallbacks = {
   onDebugFrame?: (info: { hasFace: boolean; metrics: Metrics | null; step: string }) => void;
 };
 
+export type LivenessSoundOptions = {
+  baseUrl?: string;
+  left?: string;
+  blink?: string;
+  right?: string;
+  nod?: string;
+  mouth?: string;
+  good?: string;
+  capture?: string;
+};
+
 export type LivenessOptions = {
   videoElement: HTMLVideoElement;
   canvasElement: HTMLCanvasElement;
   modelUrl?: string;
   wasmUrl?: string;
   callbacks?: LivenessCallbacks;
+  sounds?: LivenessSoundOptions;
 };
 
 export const DEFAULT_MODEL_URL =
@@ -56,13 +68,33 @@ export type Metrics = {
   faceSize:   number; // inter-eye distance / video width
 };
 
-const steps: LivenessStep[] = [
-  { index: 0, label: "Turn your head LEFT"  },
-  { index: 1, label: "Blink"                },
-  { index: 2, label: "Turn your head RIGHT" },
-  { index: 3, label: "Nod your head"        },
-  { index: 4, label: "Open your mouth"      },
-];
+const STEP_LABELS = [
+  "Turn your head LEFT",
+  "Blink",
+  "Turn your head RIGHT",
+  "Nod your head",
+  "Open your mouth",
+] as const;
+
+/** Step label → sound key (filename without .mp3). Used so the correct sound plays regardless of randomized step order. */
+const STEP_LABEL_TO_SOUND: Record<string, string> = {
+  "Turn your head LEFT":  "left",
+  "Blink":                "blink",
+  "Turn your head RIGHT": "right",
+  "Nod your head":        "nod",
+  "Open your mouth":      "mouth",
+};
+
+function shuffleArray<T>(array: readonly T[]): T[] {
+  const out = [...array];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+const steps: LivenessStep[] = shuffleArray(STEP_LABELS).map((label, index) => ({ index, label }));
 
 export const LIVENESS_STEP_COUNT = steps.length;
 
@@ -187,6 +219,39 @@ export class LivenessEngine {
 
   constructor(private opts: LivenessOptions) {}
 
+  private playSound(url: string): void {
+    const a = new Audio(url);
+    a.play().catch(() => {});
+  }
+
+  private getSoundUrl(key: string): string | undefined {
+    const s = this.opts.sounds;
+    if (!s) return undefined;
+    const override = (s as Record<string, string | undefined>)[key];
+    if (override) return override;
+    const base = s.baseUrl;
+    if (!base) return undefined;
+    const baseNorm = base.replace(/\/?$/, "/");
+    return baseNorm + key + ".mp3";
+  }
+
+  private playStepSound(stepLabel: string): void {
+    const key = STEP_LABEL_TO_SOUND[stepLabel];
+    if (!key) return;
+    const url = this.getSoundUrl(key);
+    if (url) this.playSound(url);
+  }
+
+  private playGoodSound(): void {
+    const url = this.getSoundUrl("good");
+    if (url) this.playSound(url);
+  }
+
+  private playCaptureSound(): void {
+    const url = this.getSoundUrl("capture");
+    if (url) this.playSound(url);
+  }
+
   // ── Public ─────────────────────────────────────────────────────────────────
 
   async start(): Promise<void> {
@@ -199,6 +264,7 @@ export class LivenessEngine {
     this.stepStart = now + config.readyMs;
     this.resetStepState();
     this.opts.callbacks?.onChallengeChanged?.(steps[0].index, steps[0].label);
+    this.playStepSound(steps[0].label);
     await this.ensureVideo();
     this.landmarker = await this.createLandmarker();
     this.loop();
@@ -455,11 +521,13 @@ export class LivenessEngine {
 
   private advanceStep(now: number): "passed" | "none" {
     this.stepIndex += 1;
+    this.playGoodSound();
     if (this.stepIndex >= steps.length) return "passed";
     this.stepStart = now + config.readyMs;
     this.resetStepState();
     const step = steps[this.stepIndex];
     this.opts.callbacks?.onChallengeChanged?.(step.index, step.label);
+    this.playStepSound(step.label);
     return "none";
   }
 
@@ -473,6 +541,7 @@ export class LivenessEngine {
   private scheduleCapture(): void {
     let attempts = 0;
 
+    this.playCaptureSound();
     // Tell the UI to prompt the user to relax their face
     this.opts.callbacks?.onChallengeChanged?.(-1, "Relax and look at the camera");
 

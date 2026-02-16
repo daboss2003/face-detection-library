@@ -3,7 +3,7 @@ import { startLivenessWithUI } from "./ui";
 
 export type { StartLivenessOptions } from "./ui";
 export { DEFAULT_MODEL_URL, DEFAULT_WASM_URL, LIVENESS_STEP_COUNT } from "./engine";
-export type { LivenessCallbacks, LivenessOptions } from "./engine";
+export type { LivenessCallbacks, LivenessOptions, LivenessSoundOptions } from "./engine";
 export type { LivenessEngine } from "./engine";
 
 let currentEngine: LivenessEngine | null = null;

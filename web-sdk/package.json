@@ -14,7 +14,8 @@
   "types": "dist/index.d.ts",
   "files": [
     "dist/",
-    "src/"
+    "src/",
+    "public/"
   ],
   "license": "Apache-2.0",
   "repository": {
@@ -26,7 +27,7 @@
     "url": "https://github.com/daboss2003/face-detection-library/issues"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "node scripts/embed-audios.cjs && tsc -p tsconfig.json",
     "prepublishOnly": "npm run build"
   },
   "devDependencies": {
