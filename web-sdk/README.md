@@ -1,6 +1,6 @@
 # @daboss/liveness-web
 
-Lightweight web liveness detection using MediaPipe Face Landmarker (CDN).
+Lightweight web liveness detection using MediaPipe Face Landmarker (CDN). The SDK provides the full UI: oval face frame, camera, and step progress. You only supply callbacks.
 
 ## Install
 
@@ -13,18 +13,32 @@ npm install @daboss/liveness-web
 ```ts
 import { startLiveness } from "@daboss/liveness-web";
 
-const video = document.getElementById("video") as HTMLVideoElement;
-const canvas = document.getElementById("canvas") as HTMLCanvasElement;
-
-await startLiveness({
-  videoElement: video,
-  canvasElement: canvas,
+startLiveness({
+  container: document.getElementById("root"), // optional; defaults to document.body
   callbacks: {
-    onChallengeChanged: (stepIndex, stepLabel) => console.log(stepIndex, stepLabel),
-    onFailure: (reason) => console.error(reason),
-    onSuccess: (imageBase64) => console.log(imageBase64)
-  }
+    onSuccess(imageBase64) {
+      console.log("Verified", imageBase64.length);
+    },
+    onFailure(reason) {
+      console.error(reason);
+    },
+    onChallengeChanged(stepIndex, stepLabel) {
+      console.log(`Step ${stepIndex + 1}: ${stepLabel}`);
+    },
+  },
 });
+```
+
+- **Auto-start:** Verification starts as soon as `startLiveness` is called (no Start button).
+- **Runs until complete:** The flow continues until the user passes all steps or a hard error occurs. Wrong poses do not stop the session; the user can keep trying until they get each step right.
+- **No timeouts:** Steps are not timed out.
+- **Progress:** The oval border fills by segment as each step is completed (5 steps total).
+
+To cancel and release the camera:
+
+```ts
+import { stop } from "@daboss/liveness-web";
+stop();
 ```
 
 ## Notes

@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Liveness Debug</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #0d0d0d; color: #e0e0e0; font-family: monospace; font-size: 13px; }
+
+.layout {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 100vh;
+  padding: 12px;
+  gap: 12px;
+}
+
+.video-wrap {
+  position: relative;
+  width: min(100%, 400px);
+  aspect-ratio: 4/3;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #111;
+}
+video {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1);
+  display: block;
+}
+.oval-guide {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.oval-guide svg { width: 100%; height: 100%; }
+
+.panel {
+  width: min(100%, 400px);
+  background: #161616;
+  border: 1px solid #2a2a2a;
+  border-radius: 10px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.metric-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 5px 0;
+  border-bottom: 1px solid #1e1e1e;
+}
+.metric-row:last-child { border-bottom: none; }
+.label { color: #666; }
+.value { font-weight: bold; font-size: 14px; }
+.value.ok   { color: #12c95c; }
+.value.warn { color: #f5a623; }
+.value.bad  { color: #ff3b3b; }
+
+.status-bar {
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: bold;
+  text-align: center;
+  background: #1e1e1e;
+  color: #fff;
+}
+.status-bar.face-ok    { background: #0a3d1f; color: #12c95c; }
+.status-bar.face-out   { background: #3d0a0a; color: #ff3b3b; }
+.status-bar.no-face    { background: #2a1a00; color: #f5a623; }
+
+.thresholds {
+  font-size: 11px;
+  color: #444;
+  line-height: 1.7;
+  padding: 8px 0 0;
+}
+.thresholds b { color: #555; }
+
+#log {
+  width: min(100%, 400px);
+  background: #0a0a0a;
+  border: 1px solid #1e1e1e;
+  border-radius: 8px;
+  padding: 10px;
+  max-height: 140px;
+  overflow-y: auto;
+  font-size: 11px;
+  color: #555;
+  line-height: 1.6;
+}
+</style>
+</head>
+<body>
+<div class="layout">
+
+  <div class="video-wrap">
+    <video id="v" autoplay playsinline muted></video>
+    <!-- Oval guide overlay — matches engine config ovalCx=0.5, ovalCy=0.4 -->
+    <div class="oval-guide">
+      <svg viewBox="0 0 100 75" preserveAspectRatio="none">
+        <!--
+          ovalCx=0.50 → x=50%  ovalRx=0.24 → rx=24% of width = 24 units
+          ovalCy=0.40 → y=30%  ovalRy=0.32 → ry=32% of height = 24 units
+          (height is 75% of width for 4:3 aspect, so 0.32*75=24)
+        -->
+        <ellipse id="oval-svg" cx="50" cy="30" rx="24" ry="24"
+          fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="0.5"
+          stroke-dasharray="2,1"/>
+        <!-- Face centre dot -->
+        <circle id="face-dot" cx="-10" cy="-10" r="1.2" fill="#12c95c" opacity="0.8"/>
+      </svg>
+    </div>
+  </div>
+
+  <div id="status" class="status-bar no-face">Waiting for face…</div>
+
+  <div class="panel">
+    <div class="metric-row">
+      <span class="label">YAW (head left/right)</span>
+      <span id="m-yaw" class="value">—</span>
+    </div>
+    <div class="metric-row">
+      <span class="label">PITCH (head up/down)</span>
+      <span id="m-pitch" class="value">—</span>
+    </div>
+    <div class="metric-row">
+      <span class="label">BLINK score (0=open 1=closed)</span>
+      <span id="m-blink" class="value">—</span>
+    </div>
+    <div class="metric-row">
+      <span class="label">MOUTH score (jawOpen 0→1)</span>
+      <span id="m-mouth" class="value">—</span>
+    </div>
+    <div class="metric-row">
+      <span class="label">FACE centre X (mirrored)</span>
+      <span id="m-cx" class="value">—</span>
+    </div>
+    <div class="metric-row">
+      <span class="label">FACE centre Y</span>
+      <span id="m-cy" class="value">—</span>
+    </div>
+    <div class="metric-row">
+      <span class="label">FACE size (inter-eye / width)</span>
+      <span id="m-sz" class="value">—</span>
+    </div>
+    <div class="metric-row">
+      <span class="label">IN OVAL?</span>
+      <span id="m-oval" class="value">—</span>
+    </div>
+
+    <div class="thresholds">
+      <b>Thresholds:</b><br>
+      Yaw LEFT &lt; <b>-22°</b> &nbsp;|&nbsp; RIGHT &gt; <b>22°</b><br>
+      Wrong-dir deadband: <b>±28°</b><br>
+      Blink closed &gt; <b>0.40</b> &nbsp;|&nbsp; open &lt; <b>0.15</b><br>
+      Mouth open &gt; <b>0.35</b><br>
+      Oval cx=<b>0.50</b> cy=<b>0.40</b> rx=<b>0.24</b> ry=<b>0.32</b><br>
+      Face size: <b>0.16</b> – <b>0.52</b>
+    </div>
+  </div>
+
+  <div id="log"></div>
+
+</div>
+
+<script type="module">
+const MODEL_URL = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
+const WASM_URL  = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm";
+
+// ── Engine config (keep in sync with engine.ts) ──────────────────────────────
+const cfg = {
+  ovalCx: 0.50, ovalCy: 0.40, ovalRx: 0.24, ovalRy: 0.32,
+  minFaceSize: 0.16, maxFaceSize: 0.52,
+  yawLeft: -18, yawRight: 18, wrongDeadband: 28,
+  blinkClosed: 0.40, blinkOpen: 0.15,
+  mouthOpen: 0.35,
+};
+
+// ── DOM refs ─────────────────────────────────────────────────────────────────
+const video    = document.getElementById("v");
+const status   = document.getElementById("status");
+const faceDot  = document.getElementById("face-dot");
+const ovalSvg  = document.getElementById("oval-svg");
+const logEl    = document.getElementById("log");
+
+const el = name => document.getElementById("m-" + name);
+
+function cls(val, lo, hi) {
+  if (val === null || val === undefined) return "";
+  if (val >= lo && val <= hi) return "ok";
+  const dist = Math.min(Math.abs(val - lo), Math.abs(val - hi));
+  return dist < (hi - lo) * 0.3 ? "warn" : "bad";
+}
+
+function addLog(msg) {
+  const line = document.createElement("div");
+  line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  logEl.appendChild(line);
+  logEl.scrollTop = logEl.scrollHeight;
+  if (logEl.children.length > 60) logEl.firstChild.remove();
+}
+
+// ── Camera ────────────────────────────────────────────────────────────────────
+addLog("Requesting camera…");
+const stream = await navigator.mediaDevices.getUserMedia({
+  video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
+  audio: false,
+});
+video.srcObject = stream;
+await video.play();
+await new Promise(resolve => {
+  const check = () => video.readyState >= 2 && video.videoWidth > 0
+    ? resolve() : requestAnimationFrame(check);
+  check();
+});
+addLog(`Camera ready: ${video.videoWidth}×${video.videoHeight}`);
+
+// ── MediaPipe ─────────────────────────────────────────────────────────────────
+addLog("Loading MediaPipe face landmarker…");
+const mp  = await import("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest");
+const vis = await mp.FilesetResolver.forVisionTasks(WASM_URL);
+const lm  = await mp.FaceLandmarker.createFromOptions(vis, {
+  baseOptions: { modelAssetPath: MODEL_URL, delegate: "GPU" },
+  runningMode: "VIDEO", numFaces: 1,
+  outputFaceBlendshapes: true,
+  outputFacialTransformationMatrixes: true,
+});
+addLog("Landmarker ready — move your face into the oval");
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+function ear(o,i,t1,t2,b1,b2) {
+  const h = dist(o,i); return h===0?0:(dist(t1,b1)+dist(t2,b2))/(2*h);
+}
+
+function extractPose(result, lks) {
+  const mats = result.facialTransformationMatrixes;
+  const first = Array.isArray(mats) ? mats[0] : undefined;
+  const data  = Array.isArray(first) ? first : first?.data;
+  if (data && data.length >= 16) {
+    const r00=data[0],r10=data[1],r20=data[2],r21=data[6],r22=data[10];
+    return {
+      yaw:   Math.atan2(r10,r00)*180/Math.PI,
+      pitch: Math.asin(Math.max(-1,Math.min(1,-r20)))*180/Math.PI,
+      src:   "matrix",
+    };
+  }
+  const le=lks[33],re=lks[263],n=lks[1],ch=lks[152];
+  return {
+    yaw:   Math.atan2(re.z-le.z, re.x-le.x)*180/Math.PI,
+    pitch: Math.atan2(ch.y-n.y, ch.z-n.z)*180/Math.PI,
+    src:   "landmarks",
+  };
+}
+
+function isFaceInOval(cx, cy, size) {
+  // mirror x (video is CSS-flipped)
+  const mx = 1 - cx;
+  const dx = (mx - cfg.ovalCx) / cfg.ovalRx;
+  const dy = (cy  - cfg.ovalCy) / cfg.ovalRy;
+  const inEllipse = dx*dx + dy*dy <= 1;
+  const sizeOk = size >= cfg.minFaceSize && size <= cfg.maxFaceSize;
+  return { inEllipse, sizeOk, inside: inEllipse && sizeOk };
+}
+
+// ── Main loop ─────────────────────────────────────────────────────────────────
+let lastTs = -1;
+let poseSrc = "?";
+let frameCount = 0;
+
+function loop() {
+  const now = performance.now();
+  const ts  = now > lastTs ? now : lastTs + 1;
+  lastTs = ts;
+
+  const result = lm.detectForVideo(video, ts);
+
+  if (!result.faceLandmarks?.length) {
+    status.className = "status-bar no-face";
+    status.textContent = "No face detected — move closer";
+    faceDot.setAttribute("cx", "-10"); faceDot.setAttribute("cy", "-10");
+    requestAnimationFrame(loop);
+    return;
+  }
+
+  const lks = result.faceLandmarks[0];
+
+  // Pose
+  const { yaw, pitch, src } = extractPose(result, lks);
+  if (src !== poseSrc) { addLog(`Pose source: ${src}`); poseSrc = src; }
+
+  // EAR
+  const earL = ear(lks[33],lks[133],lks[160],lks[158],lks[153],lks[144]);
+  const earR = ear(lks[362],lks[263],lks[385],lks[387],lks[373],lks[380]);
+
+  // Blendshapes
+  const bs = result.faceBlendshapes?.[0]?.categories ?? [];
+  const getBS = n => bs.find(c => c.categoryName === n)?.score ?? 0;
+  const blinkL = getBS("eyeBlinkLeft"), blinkR = getBS("eyeBlinkRight");
+  const blinkScore = (blinkL > 0 || blinkR > 0) ? (blinkL + blinkR) / 2 : 0;
+  const mouthScore = getBS("jawOpen");
+
+  // Face position
+  let sumX=0, sumY=0;
+  for (const lk of lks) { sumX+=lk.x; sumY+=lk.y; }
+  const rawCx = sumX/lks.length, rawCy = sumY/lks.length;
+  const le=lks[33], re=lks[263];
+  const faceSize = Math.hypot(re.x-le.x, re.y-le.y);
+  const { inEllipse, sizeOk, inside } = isFaceInOval(rawCx, rawCy, faceSize);
+
+  // Update oval dot (mirror x for display)
+  const dispX = (1 - rawCx) * 100;
+  const dispY = rawCy * 75; // 4:3 → y maps to 75% of svg height
+  faceDot.setAttribute("cx", dispX.toFixed(1));
+  faceDot.setAttribute("cy", dispY.toFixed(1));
+  ovalSvg.setAttribute("stroke", inside ? "rgba(18,201,92,0.6)" : "rgba(255,59,59,0.5)");
+
+  // Status
+  if (inside) {
+    status.className = "status-bar face-ok";
+    status.textContent = `✓ Face in oval — YAW: ${yaw.toFixed(1)}°`;
+  } else {
+    status.className = "status-bar face-out";
+    const why = !inEllipse
+      ? `Centre off (x=${((1-rawCx)).toFixed(2)} y=${rawCy.toFixed(2)})`
+      : `Size ${sizeOk ? "ok" : `${faceSize.toFixed(2)} out of [${cfg.minFaceSize}–${cfg.maxFaceSize}]`}`;
+    status.textContent = `✗ Out of oval — ${why}`;
+  }
+
+  // Metric display
+  const yawClass = Math.abs(yaw) < 10 ? "ok" : Math.abs(yaw) < 18 ? "warn" : "bad";
+  el("yaw").className   = `value ${yawClass}`;
+  el("yaw").textContent = `${yaw.toFixed(1)}°  (left<-18 | right>18)`;
+
+  const pitchClass = Math.abs(pitch) < 10 ? "ok" : Math.abs(pitch) < 20 ? "warn" : "bad";
+  el("pitch").className   = `value ${pitchClass}`;
+  el("pitch").textContent = `${pitch.toFixed(1)}°`;
+
+  const blinkClass = blinkScore < 0.15 ? "ok" : blinkScore > 0.40 ? "bad" : "warn";
+  el("blink").className   = `value ${blinkClass}`;
+  el("blink").textContent = `${blinkScore.toFixed(3)}  L:${blinkL.toFixed(3)} R:${blinkR.toFixed(3)}`;
+
+  const mouthClass = mouthScore > 0.35 ? "bad" : "ok";
+  el("mouth").className   = `value ${mouthClass}`;
+  el("mouth").textContent = `${mouthScore.toFixed(3)}`;
+
+  el("cx").className   = `value ${inEllipse ? "ok" : "bad"}`;
+  el("cx").textContent = `${(1 - rawCx).toFixed(3)}  (raw: ${rawCx.toFixed(3)})`;
+
+  el("cy").className   = `value ${inEllipse ? "ok" : "bad"}`;
+  el("cy").textContent = `${rawCy.toFixed(3)}  (oval cy: ${cfg.ovalCy})`;
+
+  el("sz").className   = `value ${sizeOk ? "ok" : "bad"}`;
+  el("sz").textContent = `${faceSize.toFixed(3)}`;
+
+  el("oval").className   = `value ${inside ? "ok" : "bad"}`;
+  el("oval").textContent = inside ? "YES ✓" : `NO — ellipse:${inEllipse} size:${sizeOk}`;
+
+  // Log significant events every ~60 frames
+  frameCount++;
+  if (frameCount % 60 === 0) {
+    addLog(`yaw=${yaw.toFixed(1)}° pitch=${pitch.toFixed(1)}° blink=${blinkScore.toFixed(2)} cx=${(1-rawCx).toFixed(2)} cy=${rawCy.toFixed(2)} sz=${faceSize.toFixed(2)} oval=${inside}`);
+  }
+
+  requestAnimationFrame(loop);
+}
+
+loop();
+</script>
+</body>
+</html>

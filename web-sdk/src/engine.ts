@@ -2,6 +2,14 @@ export type LivenessCallbacks = {
   onChallengeChanged?: (stepIndex: number, stepLabel: string) => void;
   onFailure?: (reason: string) => void;
   onSuccess?: (imageBase64: string) => void;
+  /**
+   * Called when face enters/leaves the oval, with a human-readable reason
+   * when outside so the UI can give specific guidance.
+   * reason is undefined when inside === true.
+   */
+  onFaceInOval?: (inside: boolean, reason?: string) => void;
+  /** Per-frame debug hook */
+  onDebugFrame?: (info: { hasFace: boolean; metrics: Metrics | null; step: string }) => void;
 };
 
 export type LivenessOptions = {
@@ -19,10 +27,12 @@ export const DEFAULT_WASM_URL =
   "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm";
 
 type NormalizedLandmark = { x: number; y: number; z: number };
+type BlendshapeCategory  = { categoryName: string; score: number };
 
 type FaceLandmarkerResult = {
   faceLandmarks: NormalizedLandmark[][];
   facialTransformationMatrixes?: Array<{ data?: number[] | Float32Array } | number[]>;
+  faceBlendshapes?: Array<{ categories: BlendshapeCategory[] }>;
 };
 
 type FaceLandmarker = {
@@ -30,10 +40,7 @@ type FaceLandmarker = {
   close: () => void;
 };
 
-type FilesetResolver = {
-  forVisionTasks: (wasmUrl: string) => Promise<unknown>;
-};
-
+type FilesetResolver  = { forVisionTasks: (wasmUrl: string) => Promise<unknown> };
 type TasksVisionModule = {
   FaceLandmarker: {
     createFromOptions: (vision: unknown, options: Record<string, unknown>) => Promise<FaceLandmarker>;
@@ -41,304 +48,510 @@ type TasksVisionModule = {
   FilesetResolver: FilesetResolver;
 };
 
-type LivenessStep = {
-  index: number;
-  label: string;
+type LivenessStep = { index: number; label: string };
+
+export type Metrics = {
+  yaw: number;
+  pitch: number;
+  ear: number;
+  mar: number;
+  blinkScore: number;
+  mouthScore: number;
+  faceCx: number;   // raw (unmirrored) normalised x centre [0,1]
+  faceCy: number;   // normalised y centre [0,1]
+  faceSize: number; // inter-eye distance / video width
 };
 
 const steps: LivenessStep[] = [
-  { index: 0, label: "Turn your head LEFT" },
-  { index: 1, label: "Blink" },
+  { index: 0, label: "Turn your head LEFT"  },
+  { index: 1, label: "Blink"                },
   { index: 2, label: "Turn your head RIGHT" },
-  { index: 3, label: "Nod your head" },
-  { index: 4, label: "Open your mouth" }
+  { index: 3, label: "Nod your head"        },
+  { index: 4, label: "Open your mouth"      },
 ];
 
+export const LIVENESS_STEP_COUNT = steps.length;
+
 const config = {
-  yawLeftThreshold: -15,
-  yawRightThreshold: 15,
-  frontalYawThreshold: 10,
-  frontalPitchThreshold: 10,
-  blinkOpenThreshold: 0.25,
-  blinkClosedThreshold: 0.18,
-  blinkMaxDurationMs: 1000,
-  blinkTimeoutMs: 5000,
-  stepTimeoutMs: 10000,
-  mouthTimeoutMs: 5000,
-  mouthOpenThreshold: 0.35,
-  nodDownThreshold: 15,
-  nodUpThreshold: -5,
-  nodTimeoutMs: 10000,
-  maxYawDuringBlink: 20,
-  maxPitchDuringBlink: 20,
-  maxYawDuringNod: 20,
-  maxYawDuringMouth: 20,
+  readyMs: 2000,
+
+  // ── Head turn ──────────────────────────────────────────────────────────────
+  yawLeftThreshold:      -18,
+  yawRightThreshold:        18,
+  wrongDirectionDeadband: 28,
+  holdMs: 250,
+
+  // ── Frontal capture guard ──────────────────────────────────────────────────
+  frontalYawThreshold:   15,
+  frontalPitchThreshold: 15,
+
+  // ── Blink ──────────────────────────────────────────────────────────────────
+  blinkClosedThreshold: 0.40,
+  blinkOpenThreshold:   0.15,
+  earClosedThreshold:   0.18,
+  earOpenThreshold:     0.23,
+  blinkMaxDurationMs:   3000,
+  maxYawDuringBlink:    20,
+  maxPitchDuringBlink:  20,
+
+  // ── Mouth ──────────────────────────────────────────────────────────────────
+  mouthOpenBlendshapeThreshold: 0.35,
+  mouthOpenMarThreshold:        0.30,
+  maxYawDuringMouth:  20,
   maxPitchDuringMouth: 20,
-  captureDelayMs: 400
+
+  // ── Nod ───────────────────────────────────────────────────────────────────
+  nodDownThreshold: 14,
+  nodUpThreshold:   -3,
+  maxYawDuringNod:  20,
+
+  // ── Face-in-oval ───────────────────────────────────────────────────────────
+  /**
+   * The oval is centred at 50% x, 40% y of the **video** frame.
+   * These are in normalised [0,1] video coordinates (not screen pixels).
+   *
+   * NOTE: the video is CSS-mirrored for display. MediaPipe gives raw
+   * (unmirrored) coords. We flip x before the ellipse test.
+   *
+   * The rx/ry values are intentionally relaxed (larger than the visual oval)
+   * so the check doesn't block users who are slightly off-centre. The visual
+   * oval in the UI is just a guide — we don't need pixel-perfect alignment.
+   */
+  ovalCx: 0.50,
+  ovalCy: 0.42,   // slightly below centre — faces tend to sit a bit lower
+  ovalRx: 0.30,   // relaxed from 0.24 — was blocking valid faces
+  ovalRy: 0.38,   // relaxed from 0.32
+
+  /**
+   * Face size = inter-eye distance / video width.
+   * Comfortable desktop: 0.15–0.50
+   * Mobile portrait:     0.20–0.55
+   * Use a wide range so we don't fail on different camera distances.
+   */
+  minFaceSize: 0.12,
+  maxFaceSize: 0.58,
+
+  /**
+   * Steps where the head turns away from centre — oval containment is
+   * relaxed for x-axis during these steps because the face SHOULD drift.
+   */
+  headTurnSteps: new Set(["Turn your head LEFT", "Turn your head RIGHT"]),
+
+  // ── Capture ───────────────────────────────────────────────────────────────
+  captureDelayMs:      500,
+  captureMaxAttempts:   90,
 };
 
 export class LivenessEngine {
-  private landmarker: FaceLandmarker | null = null;
-  private running = false;
-  private rafId: number | null = null;
-  private stream: MediaStream | null = null;
+  private landmarker:  FaceLandmarker | null = null;
+  private running      = false;
+  private rafId:       number | null = null;
+  private stream:      MediaStream | null = null;
 
-  private stepIndex = 0;
-  private stepStart = 0;
-  private blinkState: "open" | "closed" | "openAgain" = "open";
-  private nodState: "down" | "up" = "down";
-  private latestMetrics: { yaw: number; pitch: number; ear: number } | null = null;
+  private stepIndex  = 0;
+  private stepStart  = 0;
+
+  private blinkState:   "open" | "closed" = "open";
+  private blinkCloseTs  = 0;
+  private nodState:     "neutral" | "down" = "neutral";
+  private holdStart:    number | null = null;
+
+  private latestMetrics: Metrics | null = null;
+  private lastDetectTs   = -1;
+  private lastOvalState: boolean | null = null;
 
   constructor(private opts: LivenessOptions) {}
 
-  async start(): Promise<void> {
-    this.stop();
-    this.running = true;
-    this.stepIndex = 0;
-    this.stepStart = performance.now();
-    this.opts.callbacks?.onChallengeChanged?.(steps[0].index, steps[0].label);
+  // ── Public API ─────────────────────────────────────────────────────────────
 
+  async start(): Promise<void> {
+    this.stopDetectionOnly();
+    this.running       = true;
+    this.stepIndex     = 0;
+    this.lastDetectTs  = -1;
+    this.lastOvalState = null;
+    const now = performance.now();
+    this.stepStart = now + config.readyMs;
+    this.resetStepState();
+    this.opts.callbacks?.onChallengeChanged?.(steps[0].index, steps[0].label);
     await this.ensureVideo();
     this.landmarker = await this.createLandmarker();
     this.loop();
   }
 
   stop(): void {
-    this.running = false;
-    if (this.rafId != null) {
-      cancelAnimationFrame(this.rafId);
-      this.rafId = null;
-    }
-    if (this.landmarker) {
-      this.landmarker.close();
-      this.landmarker = null;
-    }
+    this.stopDetectionOnly();
     if (this.stream) {
-      this.stream.getTracks().forEach((t) => t.stop());
+      this.stream.getTracks().forEach(t => t.stop());
       this.stream = null;
     }
   }
+
+  private stopDetectionOnly(): void {
+    this.running = false;
+    if (this.rafId != null) { cancelAnimationFrame(this.rafId); this.rafId = null; }
+    if (this.landmarker)    { this.landmarker.close(); this.landmarker = null; }
+  }
+
+  // ── Video ──────────────────────────────────────────────────────────────────
 
   private async ensureVideo(): Promise<void> {
     const video = this.opts.videoElement;
     if (!video.srcObject) {
       this.stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user" },
-        audio: false
+        video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
+        audio: false,
       });
       video.srcObject = this.stream;
+    } else {
+      this.stream = video.srcObject as MediaStream;
     }
     video.playsInline = true;
     await video.play();
+    await this.waitForVideoReady(video);
   }
+
+  private waitForVideoReady(video: HTMLVideoElement): Promise<void> {
+    return new Promise(resolve => {
+      const check = () => {
+        if (video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0) resolve();
+        else requestAnimationFrame(check);
+      };
+      check();
+    });
+  }
+
+  // ── Landmarker ─────────────────────────────────────────────────────────────
 
   private async createLandmarker(): Promise<FaceLandmarker> {
     const module = await loadTasksVision();
-    const vision = await module.FilesetResolver.forVisionTasks(
-      this.opts.wasmUrl ?? DEFAULT_WASM_URL
-    );
+    const vision = await module.FilesetResolver.forVisionTasks(this.opts.wasmUrl ?? DEFAULT_WASM_URL);
     return module.FaceLandmarker.createFromOptions(vision, {
       baseOptions: {
-        modelAssetPath: this.opts.modelUrl ?? DEFAULT_MODEL_URL
+        modelAssetPath: this.opts.modelUrl ?? DEFAULT_MODEL_URL,
+        delegate: "GPU",
       },
       runningMode: "VIDEO",
       numFaces: 1,
       outputFaceBlendshapes: true,
-      outputFacialTransformationMatrixes: true
+      outputFacialTransformationMatrixes: true,
     });
   }
 
+  // ── Detection loop ─────────────────────────────────────────────────────────
+
   private loop(): void {
     if (!this.running || !this.landmarker) return;
+
     const now = performance.now();
-    const result = this.landmarker.detectForVideo(this.opts.videoElement, now);
-    if (result.faceLandmarks && result.faceLandmarks.length > 0) {
+    const ts  = now > this.lastDetectTs ? now : this.lastDetectTs + 1;
+    this.lastDetectTs = ts;
+
+    const result  = this.landmarker.detectForVideo(this.opts.videoElement, ts);
+    const hasFace = !!(result.faceLandmarks?.length);
+
+    if (hasFace) {
       const metrics = extractMetrics(result);
       this.latestMetrics = metrics;
-      const update = this.updateState(metrics, now);
-      if (update === "passed") {
+
+      const { inside, reason } = this.checkFaceInOval(metrics);
+
+      // Only fire callback on change to avoid flooding the UI
+      if (inside !== this.lastOvalState) {
+        this.lastOvalState = inside;
+        this.opts.callbacks?.onFaceInOval?.(inside, reason);
+      }
+
+      this.opts.callbacks?.onDebugFrame?.({
+        hasFace: true,
+        metrics,
+        step: steps[this.stepIndex]?.label ?? "done",
+      });
+
+      if (inside && this.updateState(metrics, now) === "passed") {
         this.scheduleCapture();
         return;
       }
+    } else {
+      if (this.lastOvalState !== false) {
+        this.lastOvalState = false;
+        this.opts.callbacks?.onFaceInOval?.(false, "No face detected");
+      }
+      this.opts.callbacks?.onDebugFrame?.({ hasFace: false, metrics: null, step: steps[this.stepIndex]?.label ?? "done" });
     }
+
     this.rafId = requestAnimationFrame(() => this.loop());
   }
 
-  private updateState(metrics: { yaw: number; pitch: number; ear: number; mar: number }, now: number): "passed" | "none" {
-    const step = steps[this.stepIndex];
-    const elapsed = now - this.stepStart;
-    const timeout =
-      step.label === "Blink"
-        ? config.blinkTimeoutMs
-        : step.label === "Open your mouth"
-        ? config.mouthTimeoutMs
-        : step.label === "Nod your head"
-        ? config.nodTimeoutMs
-        : config.stepTimeoutMs;
+  // ── Oval check ─────────────────────────────────────────────────────────────
 
-    if (elapsed > timeout) {
-      this.fail("Step timeout");
-      return "none";
+  private checkFaceInOval(m: Metrics): { inside: boolean; reason?: string } {
+    const currentStep = steps[this.stepIndex]?.label ?? "";
+    const isHeadTurn  = config.headTurnSteps.has(currentStep);
+
+    // Mirror x — video is CSS scaleX(-1), MediaPipe gives raw unmirrored coords
+    const mx = 1 - m.faceCx;
+    const my = m.faceCy;
+
+    const dx = (mx - config.ovalCx) / config.ovalRx;
+    const dy = (my - config.ovalCy) / config.ovalRy;
+
+    // During head-turn steps, only check the y-axis and size —
+    // the face WILL move horizontally as the head turns.
+    const inEllipse = isHeadTurn
+      ? Math.abs(dy) <= 1           // only vertical check
+      : dx * dx + dy * dy <= 1;    // full ellipse check
+
+    if (!inEllipse) {
+      const xDrift = mx - config.ovalCx;
+      const yDrift = my - config.ovalCy;
+      if (Math.abs(yDrift) > Math.abs(xDrift)) {
+        return { inside: false, reason: yDrift < 0 ? "Move down" : "Move up" };
+      }
+      return { inside: false, reason: xDrift < 0 ? "Move right" : "Move left" };
     }
 
-    switch (step.label) {
-      case "Turn your head LEFT":
-        if (metrics.yaw > config.yawRightThreshold) return this.fail("Wrong direction: turned right");
-        if (metrics.yaw < config.yawLeftThreshold) return this.advanceStep(now);
-        break;
-      case "Blink":
-        if (Math.abs(metrics.yaw) > config.maxYawDuringBlink || Math.abs(metrics.pitch) > config.maxPitchDuringBlink) {
-          return this.fail("Incorrect motion during blink");
+    if (m.faceSize < config.minFaceSize) return { inside: false, reason: "Move closer to the camera" };
+    if (m.faceSize > config.maxFaceSize) return { inside: false, reason: "Move further from the camera" };
+
+    return { inside: true };
+  }
+
+  // ── State machine ──────────────────────────────────────────────────────────
+
+  private resetStepState(): void {
+    this.blinkState  = "open";
+    this.blinkCloseTs = 0;
+    this.nodState    = "neutral";
+    this.holdStart   = null;
+  }
+
+  private updateState(metrics: Metrics, now: number): "passed" | "none" {
+    if (now - this.stepStart < 0) return "none";
+
+    switch (steps[this.stepIndex].label) {
+
+      case "Turn your head LEFT": {
+        if (metrics.yaw > config.wrongDirectionDeadband) { this.holdStart = null; return "none"; }
+        if (metrics.yaw < config.yawLeftThreshold) {
+          if (this.holdStart === null) this.holdStart = now;
+          if (now - this.holdStart >= config.holdMs) return this.advanceStep(now);
+        } else {
+          this.holdStart = null;
         }
-        if (this.blinkState === "open" && metrics.ear > config.blinkOpenThreshold) {
-          this.blinkState = "closed";
-        } else if (this.blinkState === "closed" && metrics.ear < config.blinkClosedThreshold) {
-          this.blinkState = "openAgain";
-        } else if (this.blinkState === "openAgain" && metrics.ear > config.blinkOpenThreshold) {
-          if (elapsed <= config.blinkMaxDurationMs) return this.advanceStep(now);
-          return this.fail("Blink too slow");
+        break;
+      }
+
+      case "Turn your head RIGHT": {
+        if (metrics.yaw < -config.wrongDirectionDeadband) { this.holdStart = null; return "none"; }
+        if (metrics.yaw > config.yawRightThreshold) {
+          if (this.holdStart === null) this.holdStart = now;
+          if (now - this.holdStart >= config.holdMs) return this.advanceStep(now);
+        } else {
+          this.holdStart = null;
         }
         break;
-      case "Turn your head RIGHT":
-        if (metrics.yaw < config.yawLeftThreshold) return this.fail("Wrong direction: turned left");
-        if (metrics.yaw > config.yawRightThreshold) return this.advanceStep(now);
+      }
+
+      case "Blink": {
+        if (Math.abs(metrics.yaw) > config.maxYawDuringBlink ||
+            Math.abs(metrics.pitch) > config.maxPitchDuringBlink) return "none";
+
+        const eyesClosed = metrics.blinkScore > 0
+          ? metrics.blinkScore > config.blinkClosedThreshold
+          : metrics.ear < config.earClosedThreshold;
+
+        const eyesOpen = metrics.blinkScore > 0
+          ? metrics.blinkScore < config.blinkOpenThreshold
+          : metrics.ear > config.earOpenThreshold;
+
+        if (this.blinkState === "open" && eyesClosed) {
+          this.blinkState  = "closed";
+          this.blinkCloseTs = now;
+        } else if (this.blinkState === "closed" && eyesOpen) {
+          if (now - this.blinkCloseTs <= config.blinkMaxDurationMs) return this.advanceStep(now);
+          this.blinkState = "open"; // too slow — reset sub-state only
+        }
         break;
-      case "Nod your head":
-        if (Math.abs(metrics.yaw) > config.maxYawDuringNod) return this.fail("Incorrect motion during nod");
-        if (this.nodState === "down" && metrics.pitch > config.nodDownThreshold) {
-          this.nodState = "up";
-        } else if (this.nodState === "up" && metrics.pitch < config.nodUpThreshold) {
+      }
+
+      case "Nod your head": {
+        if (Math.abs(metrics.yaw) > config.maxYawDuringNod) return "none";
+        if (this.nodState === "neutral" && metrics.pitch > config.nodDownThreshold) {
+          this.nodState = "down";
+        } else if (this.nodState === "down" && metrics.pitch < config.nodUpThreshold) {
           return this.advanceStep(now);
         }
         break;
-      case "Open your mouth":
-        if (Math.abs(metrics.yaw) > config.maxYawDuringMouth || Math.abs(metrics.pitch) > config.maxPitchDuringMouth) {
-          return this.fail("Incorrect motion during mouth step");
+      }
+
+      case "Open your mouth": {
+        if (Math.abs(metrics.yaw)   > config.maxYawDuringMouth ||
+            Math.abs(metrics.pitch) > config.maxPitchDuringMouth) return "none";
+
+        const mouthIsOpen = metrics.mouthScore > 0
+          ? metrics.mouthScore > config.mouthOpenBlendshapeThreshold
+          : metrics.mar > config.mouthOpenMarThreshold;
+
+        if (mouthIsOpen) {
+          if (this.holdStart === null) this.holdStart = now;
+          if (now - this.holdStart >= config.holdMs) return this.advanceStep(now);
+        } else {
+          this.holdStart = null;
         }
-        if (metrics.mar > config.mouthOpenThreshold) return this.advanceStep(now);
         break;
+      }
     }
+
     return "none";
   }
 
   private advanceStep(now: number): "passed" | "none" {
     this.stepIndex += 1;
-    if (this.stepIndex >= steps.length) {
-      return "passed";
-    }
-    this.stepStart = now;
-    this.blinkState = "open";
-    this.nodState = "down";
+    if (this.stepIndex >= steps.length) return "passed";
+    this.stepStart = now + config.readyMs;
+    this.resetStepState();
     const step = steps[this.stepIndex];
     this.opts.callbacks?.onChallengeChanged?.(step.index, step.label);
     return "none";
   }
 
-  private fail(reason: string): "none" {
+  private fail(reason: string): void {
     this.opts.callbacks?.onFailure?.(reason);
-    this.stop();
-    return "none";
+    this.stopDetectionOnly();
   }
 
+  // ── Capture ────────────────────────────────────────────────────────────────
+
   private scheduleCapture(): void {
-    setTimeout(() => {
-      const metrics = this.latestMetrics;
-      if (!metrics) {
-        this.fail("No face available for capture");
+    let attempts = 0;
+
+    const tryCapture = () => {
+      if (!this.running || !this.landmarker) return;
+      attempts++;
+
+      const now = performance.now();
+      const ts  = now > this.lastDetectTs ? now : this.lastDetectTs + 1;
+      this.lastDetectTs = ts;
+
+      const result = this.landmarker.detectForVideo(this.opts.videoElement, ts);
+      if (result.faceLandmarks?.length) {
+        const metrics = extractMetrics(result);
+        this.latestMetrics = metrics;
+
+        const eyesOpen = metrics.blinkScore > 0
+          ? metrics.blinkScore < config.blinkOpenThreshold
+          : metrics.ear > config.earOpenThreshold;
+
+        if (Math.abs(metrics.yaw)   <= config.frontalYawThreshold &&
+            Math.abs(metrics.pitch) <= config.frontalPitchThreshold &&
+            eyesOpen) {
+          this.captureImage();
+          return;
+        }
+      }
+
+      if (attempts >= config.captureMaxAttempts) {
+        this.fail("Please look straight at the camera to complete verification.");
         return;
       }
-      if (Math.abs(metrics.yaw) > config.frontalYawThreshold || Math.abs(metrics.pitch) > config.frontalPitchThreshold || metrics.ear < config.blinkOpenThreshold) {
-        this.fail("Final check failed (frontal + eyes open required)");
-        return;
-      }
-      const canvas = this.opts.canvasElement;
-      const video = this.opts.videoElement;
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) {
-        this.fail("Canvas unavailable");
-        return;
-      }
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const dataUrl = canvas.toDataURL("image/jpeg", 0.95);
-      const base64 = dataUrl.split(",")[1] || "";
-      this.opts.callbacks?.onSuccess?.(base64);
-      this.stop();
-    }, config.captureDelayMs);
+
+      this.rafId = requestAnimationFrame(tryCapture);
+    };
+
+    setTimeout(() => { this.rafId = requestAnimationFrame(tryCapture); }, config.captureDelayMs);
+  }
+
+  private captureImage(): void {
+    const canvas = this.opts.canvasElement;
+    const video  = this.opts.videoElement;
+    canvas.width  = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) { this.fail("Canvas unavailable"); return; }
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const base64 = canvas.toDataURL("image/jpeg", 0.95).split(",")[1] ?? "";
+    this.opts.callbacks?.onSuccess?.(base64);
+    this.stop();
   }
 }
 
-function extractMetrics(result: FaceLandmarkerResult) {
-  const landmarks = result.faceLandmarks[0];
+// ── Metric extraction ────────────────────────────────────────────────────────
+
+function extractMetrics(result: FaceLandmarkerResult): Metrics {
+  const landmarks  = result.faceLandmarks[0];
   const { yaw, pitch } = extractPose(result, landmarks);
   const { leftEar, rightEar } = computeEar(landmarks);
   const mar = computeMar(landmarks);
-  return { yaw, pitch, ear: (leftEar + rightEar) / 2, mar };
+
+  const categories = result.faceBlendshapes?.[0]?.categories ?? [];
+  const getBS = (name: string): number =>
+    categories.find(c => c.categoryName === name)?.score ?? 0;
+
+  const blinkL = getBS("eyeBlinkLeft"), blinkR = getBS("eyeBlinkRight");
+  const blinkScore = blinkL > 0 || blinkR > 0 ? (blinkL + blinkR) / 2 : 0;
+  const mouthScore = getBS("jawOpen");
+
+  let sumX = 0, sumY = 0;
+  for (const lm of landmarks) { sumX += lm.x; sumY += lm.y; }
+  const faceCx = sumX / landmarks.length;
+  const faceCy = sumY / landmarks.length;
+
+  const le = landmarks[33], re = landmarks[263];
+  const faceSize = Math.hypot(re.x - le.x, re.y - le.y);
+
+  return { yaw, pitch, ear: (leftEar + rightEar) / 2, mar, blinkScore, mouthScore, faceCx, faceCy, faceSize };
 }
 
 function extractPose(result: FaceLandmarkerResult, landmarks: NormalizedLandmark[]) {
   const matrices = result.facialTransformationMatrixes;
-  const first = Array.isArray(matrices) ? matrices[0] : undefined;
-  const data = Array.isArray(first)
-    ? first
-    : first && "data" in (first as any)
-    ? (first as any).data
+  const first    = Array.isArray(matrices) ? matrices[0] : undefined;
+  const data     = Array.isArray(first) ? first
+    : first && "data" in (first as object) ? (first as { data: number[] | Float32Array }).data
     : undefined;
+
   if (data && data.length >= 16) {
-    const r00 = data[0];
-    const r10 = data[4];
-    const r20 = data[8];
-    const r21 = data[9];
-    const r22 = data[10];
-    const pitch = Math.asin(-r20);
-    const yaw = Math.atan2(r10, r00);
-    const roll = Math.atan2(r21, r22);
-    return { yaw: toDeg(yaw), pitch: toDeg(pitch), roll: toDeg(roll) };
+    const r00 = data[0], r10 = data[1], r20 = data[2];
+    const r21 = data[6], r22 = data[10];
+    return {
+      yaw:   toDeg(Math.atan2(r10, r00)),
+      pitch: toDeg(Math.asin(Math.max(-1, Math.min(1, -r20)))),
+      roll:  toDeg(Math.atan2(r21, r22)),
+    };
   }
 
-  const leftEyeOuter = landmarks[33];
-  const rightEyeOuter = landmarks[263];
-  const noseTip = landmarks[1];
-  const chin = landmarks[152];
-  const yaw = Math.atan2(rightEyeOuter.z - leftEyeOuter.z, rightEyeOuter.x - leftEyeOuter.x);
-  const roll = Math.atan2(rightEyeOuter.y - leftEyeOuter.y, rightEyeOuter.x - leftEyeOuter.x);
-  const pitch = Math.atan2(chin.y - noseTip.y, chin.z - noseTip.z);
-  return { yaw: toDeg(yaw), pitch: toDeg(pitch), roll: toDeg(roll) };
+  const le = landmarks[33], re = landmarks[263], n = landmarks[1], ch = landmarks[152];
+  return {
+    yaw:   toDeg(Math.atan2(re.z - le.z, re.x - le.x)),
+    pitch: toDeg(Math.atan2(ch.y - n.y,  ch.z - n.z)),
+    roll:  toDeg(Math.atan2(re.y - le.y, re.x - le.x)),
+  };
 }
 
-function computeEar(landmarks: NormalizedLandmark[]) {
-  const left = ear(landmarks[33], landmarks[133], landmarks[160], landmarks[158], landmarks[153], landmarks[144]);
-  const right = ear(landmarks[362], landmarks[263], landmarks[385], landmarks[387], landmarks[373], landmarks[380]);
-  return { leftEar: left, rightEar: right };
+function computeEar(lks: NormalizedLandmark[]) {
+  return {
+    leftEar:  ear(lks[33],  lks[133], lks[160], lks[158], lks[153], lks[144]),
+    rightEar: ear(lks[362], lks[263], lks[385], lks[387], lks[373], lks[380]),
+  };
 }
 
-function computeMar(landmarks: NormalizedLandmark[]) {
-  const left = landmarks[61];
-  const right = landmarks[291];
-  const upper = landmarks[13];
-  const lower = landmarks[14];
-  const horizontal = distance(left, right);
-  const vertical = distance(upper, lower);
-  return horizontal === 0 ? 0 : vertical / horizontal;
+function computeMar(lks: NormalizedLandmark[]) {
+  const h = dist(lks[61], lks[291]), v = dist(lks[13], lks[14]);
+  return h === 0 ? 0 : v / h;
 }
 
-function ear(outer: NormalizedLandmark, inner: NormalizedLandmark, top1: NormalizedLandmark, top2: NormalizedLandmark, bottom1: NormalizedLandmark, bottom2: NormalizedLandmark) {
-  const v1 = distance(top1, bottom1);
-  const v2 = distance(top2, bottom2);
-  const h = distance(outer, inner);
-  return h === 0 ? 0 : (v1 + v2) / (2 * h);
+function ear(o: NormalizedLandmark, i: NormalizedLandmark, t1: NormalizedLandmark, t2: NormalizedLandmark, b1: NormalizedLandmark, b2: NormalizedLandmark) {
+  const h = dist(o, i);
+  return h === 0 ? 0 : (dist(t1, b1) + dist(t2, b2)) / (2 * h);
 }
 
-function distance(a: NormalizedLandmark, b: NormalizedLandmark) {
+function dist(a: NormalizedLandmark, b: NormalizedLandmark) {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
-function toDeg(rad: number) {
-  return (rad * 180) / Math.PI;
-}
+function toDeg(rad: number) { return (rad * 180) / Math.PI; }
 
 async function loadTasksVision(): Promise<TasksVisionModule> {
-  const module = await import("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest");
-  return module as unknown as TasksVisionModule;
+  const m = await import("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest");
+  return m as unknown as TasksVisionModule;
 }
