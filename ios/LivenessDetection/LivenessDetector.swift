@@ -18,6 +18,32 @@ public extension LivenessDetectorDelegate {
 @objc public final class LivenessDetector: NSObject {
   private static let defaultModelUrl =
     "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"
+
+  @objc public static var defaultModelURL: String { defaultModelUrl }
+
+  /// Presents the SDK-owned full-screen liveness UI. Callbacks run on main.
+  public static func presentLiveness(
+    from viewController: UIViewController,
+    modelUrl: String? = nil,
+    sounds: LivenessSoundOptions? = nil,
+    onSuccess: @escaping (Data) -> Void,
+    onFailure: @escaping (String) -> Void
+  ) {
+    let vc = LivenessViewController.create(modelUrl: modelUrl, sounds: sounds, onSuccess: onSuccess, onFailure: onFailure)
+    viewController.present(vc, animated: true)
+  }
+
+  /// Obj-C friendly: pass soundBaseUrl instead of LivenessSoundOptions.
+  @objc public static func presentLiveness(
+    from viewController: UIViewController,
+    modelUrl: String?,
+    soundBaseUrl: String?,
+    onSuccess: @escaping (Data) -> Void,
+    onFailure: @escaping (String) -> Void
+  ) {
+    let sounds = soundBaseUrl.map { LivenessSoundOptions(baseUrl: $0) }
+    presentLiveness(from: viewController, modelUrl: modelUrl, sounds: sounds, onSuccess: onSuccess, onFailure: onFailure)
+  }
   private let config: LivenessConfig
   private weak var delegate: LivenessDetectorDelegate?
   private var steps: [LivenessStep]
@@ -31,22 +57,37 @@ public extension LivenessDetectorDelegate {
   private var captureDelayWorkItem: DispatchWorkItem?
   private var sessionTimeoutWorkItem: DispatchWorkItem?
   private var lastOvalState: Bool?
+  private var stepSoundPlayedForCurrentStep = false
+  private let soundPlayer: LivenessSoundPlayer
   private let workQueue = DispatchQueue(label: "com.liveness.detector.queue")
+
+  private static func soundKey(forStepLabel label: String) -> String? {
+    switch label {
+    case LivenessStep.turnLeft.label: return "left"
+    case LivenessStep.blink.label: return "blink"
+    case LivenessStep.turnRight.label: return "right"
+    case LivenessStep.nod.label: return "nod"
+    case LivenessStep.mouth.label: return "mouth"
+    default: return nil
+    }
+  }
 
   @objc public init(
     config: LivenessConfig = LivenessConfig(),
     modelPath: String? = nil,
-    delegate: LivenessDetectorDelegate
+    delegate: LivenessDetectorDelegate,
+    sounds: LivenessSoundOptions? = nil
   ) {
     self.config = config
     self.delegate = delegate
-    self.steps = LivenessStep.allCases
+    self.steps = Array(LivenessStep.allCases)
     self.stateMachine = LivenessStateMachine(config: config, steps: self.steps)
     self.modelPath = modelPath
+    self.soundPlayer = LivenessSoundPlayer(options: sounds)
   }
 
   @objc public convenience init(delegate: LivenessDetectorDelegate) {
-    self.init(config: LivenessConfig(), modelPath: nil, delegate: delegate)
+    self.init(config: LivenessConfig(), modelPath: nil, delegate: delegate, sounds: nil)
   }
 
   private var modelPath: String?
@@ -83,6 +124,7 @@ public extension LivenessDetectorDelegate {
     steps = buildSteps()
     stateMachine = LivenessStateMachine(config: config, steps: steps)
     stateMachine.reset(nowMs: nowMs)
+    stepSoundPlayedForCurrentStep = false
     delegate?.onChallengeChanged(
       stepIndex: 0,
       stepLabel: steps.first?.label ?? ""
@@ -114,6 +156,7 @@ public extension LivenessDetectorDelegate {
     captureDelayWorkItem = nil
     sessionTimeoutWorkItem?.cancel()
     sessionTimeoutWorkItem = nil
+    soundPlayer.stop()
     cameraService?.stop()
     cameraService = nil
     landmarker = nil
@@ -128,12 +171,20 @@ public extension LivenessDetectorDelegate {
     captureAttempts = 0
     delegate?.onChallengeChanged(stepIndex: -1, stepLabel: "Relax and look at the camera")
 
-    captureDelayWorkItem?.cancel()
-    let workItem = DispatchWorkItem { [weak self] in
-      self?.captureActive = true
+    let startCaptureLoop: () -> Void = { [weak self] in
+      guard let self else { return }
+      self.captureDelayWorkItem?.cancel()
+      let workItem = DispatchWorkItem { [weak self] in
+        self?.captureActive = true
+      }
+      self.captureDelayWorkItem = workItem
+      self.workQueue.asyncAfter(deadline: .now() + .milliseconds(Int(self.config.captureDelayMs)), execute: workItem)
     }
-    captureDelayWorkItem = workItem
-    workQueue.asyncAfter(deadline: .now() + .milliseconds(Int(config.captureDelayMs)), execute: workItem)
+    if soundPlayer.url(forKey: "capture") != nil {
+      soundPlayer.play(key: "capture") { DispatchQueue.main.async(execute: startCaptureLoop) }
+    } else {
+      startCaptureLoop()
+    }
   }
 
   private func attemptCapture(metrics: FaceMetrics) {
@@ -261,12 +312,29 @@ extension LivenessDetector: FaceLandmarkerPipelineDelegate {
 
     if !insideOval { return }
 
+    if !stepSoundPlayedForCurrentStep, let step = currentStep, let key = Self.soundKey(forStepLabel: step.label) {
+      stepSoundPlayedForCurrentStep = true
+      soundPlayer.play(key: key)
+    }
+
     let update = stateMachine.update(metrics: metrics, nowMs: metrics.timestampMs, insideOval: true)
     switch update {
     case .none:
       break
     case .stepChanged(let stepIndex, let stepLabel):
-      delegate?.onChallengeChanged(stepIndex: stepIndex, stepLabel: stepLabel)
+      let onGoodDone = { [weak self] in
+        guard let self else { return }
+        if let key = Self.soundKey(forStepLabel: stepLabel) {
+          self.soundPlayer.play(key: key)
+        }
+        self.stepSoundPlayedForCurrentStep = true
+        self.delegate?.onChallengeChanged(stepIndex: stepIndex, stepLabel: stepLabel)
+      }
+      if soundPlayer.url(forKey: "good") != nil {
+        soundPlayer.play(key: "good") { DispatchQueue.main.async(execute: onGoodDone) }
+      } else {
+        DispatchQueue.main.async(execute: onGoodDone)
+      }
     case .failed(let reason):
       delegate?.onFailure(reason: reason)
       stop()

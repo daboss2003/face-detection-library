@@ -1,141 +1,40 @@
 package com.liveness.demo
 
-import android.Manifest
-import android.content.pm.PackageManager
+import android.content.Intent
 import android.os.Bundle
+import android.widget.Button
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import androidx.camera.view.PreviewView
-import androidx.core.content.ContextCompat
-import com.liveness.detection.LivenessDetector
-import com.liveness.detection.LivenessListener
-import com.liveness.detection.ModelDownloader
-import com.liveness.detection.ModelSource
+import com.liveness.detection.LivenessActivity
 
-class MainActivity : AppCompatActivity(), LivenessListener {
-  private lateinit var previewView: PreviewView
-  private lateinit var overlayView: FaceOverlayView
-  private lateinit var challengeText: TextView
+class MainActivity : AppCompatActivity() {
+
+  private lateinit var startButton: Button
   private lateinit var statusText: TextView
-  private lateinit var posHintText: TextView
 
-  private var detector: LivenessDetector? = null
-  private val modelFileName = "face_landmarker.task"
-  private val modelUrl = ModelDownloader.DEFAULT_MODEL_URL
-
-  private val permissionLauncher = registerForActivityResult(
-    ActivityResultContracts.RequestPermission()
-  ) { granted ->
-    if (granted) startModelDownload() else updateStatus("Camera permission required")
+  private val livenessLauncher = registerForActivityResult(
+    ActivityResultContracts.StartActivityForResult()
+  ) { result ->
+    if (result.resultCode == RESULT_OK) {
+      val base64 = result.data?.getStringExtra(LivenessActivity.EXTRA_IMAGE_BASE64)
+      statusText.text = if (!base64.isNullOrEmpty()) "Liveness passed (image received)" else "Liveness passed"
+    } else {
+      val reason = result.data?.getStringExtra(LivenessActivity.EXTRA_FAILURE_REASON) ?: "Cancelled"
+      statusText.text = "Failed: $reason"
+    }
   }
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     setContentView(R.layout.activity_main)
-    previewView = findViewById(R.id.previewView)
-    overlayView = findViewById(R.id.overlayView)
-    challengeText = findViewById(R.id.challengeText)
+    startButton = findViewById(R.id.startButton)
     statusText = findViewById(R.id.statusText)
-    posHintText = findViewById(R.id.posHintText)
-  }
 
-  override fun onResume() {
-    super.onResume()
-    if (hasCameraPermission()) {
-      startModelDownload()
-    } else {
-      permissionLauncher.launch(Manifest.permission.CAMERA)
+    startButton.setOnClickListener {
+      statusText.text = "Starting..."
+      val intent = Intent(this, LivenessActivity::class.java)
+      livenessLauncher.launch(intent)
     }
-  }
-
-  override fun onPause() {
-    detector?.stop()
-    detector = null
-    super.onPause()
-  }
-
-  private fun startModelDownload() {
-    downloadModelFromUrl()
-  }
-
-  private fun startDetector(modelPath: String) {
-    detector?.stop()
-    detector = LivenessDetector(this, this).apply {
-      startLiveness(
-        this@MainActivity,
-        previewView,
-        true,
-        ModelSource.FilePath(modelPath)
-      )
-    }
-    updateStatus("Running")
-  }
-
-  private fun downloadModelFromUrl() {
-    runOnUiThread { updateStatus("Downloading model (HTTP)...") }
-    ModelDownloader.downloadIfNeeded(
-      context = this,
-      url = modelUrl,
-      fileName = modelFileName,
-      onSuccess = { file ->
-        runOnUiThread { startDetector(file.absolutePath) }
-      },
-      onError = { error ->
-        runOnUiThread { updateStatus(error) }
-      }
-    )
-  }
-
-  private fun hasCameraPermission(): Boolean {
-    return ContextCompat.checkSelfPermission(
-      this,
-      Manifest.permission.CAMERA
-    ) == PackageManager.PERMISSION_GRANTED
-  }
-
-  override fun onChallengeChanged(stepIndex: Int, stepLabel: String) {
-    runOnUiThread {
-      challengeText.text = stepLabel
-      if (stepIndex >= 0) {
-        statusText.text = "Step ${stepIndex + 1} of 5"
-        overlayView.setProgress(stepIndex)
-        overlayView.setStepDots(stepIndex)
-      } else {
-        statusText.text = "Relax and look at the camera"
-        overlayView.setProgress(5)
-        overlayView.setStepDots(5)
-      }
-    }
-  }
-
-  override fun onLivenessPassed(imageBytes: ByteArray) {
-    runOnUiThread {
-      statusText.text = "Liveness passed (${imageBytes.size} bytes)"
-    }
-  }
-
-  override fun onFailure(reason: String) {
-    runOnUiThread {
-      statusText.text = "Failed: $reason"
-    }
-  }
-
-  override fun onFaceDetected(boundingBox: android.graphics.RectF?) {
-    runOnUiThread {
-      overlayView.updateBoundingBox(boundingBox)
-    }
-  }
-
-  override fun onFaceInOval(inside: Boolean, reason: String?) {
-    runOnUiThread {
-      overlayView.setFaceInOval(inside)
-      posHintText.visibility = if (inside) android.view.View.GONE else android.view.View.VISIBLE
-      posHintText.text = reason ?: ""
-    }
-  }
-
-  private fun updateStatus(text: String) {
-    statusText.text = text
   }
 }

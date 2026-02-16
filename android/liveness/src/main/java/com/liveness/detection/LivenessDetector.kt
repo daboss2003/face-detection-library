@@ -9,10 +9,19 @@ import androidx.lifecycle.LifecycleOwner
 import com.google.mediapipe.framework.image.MPImage
 import com.google.mediapipe.tasks.vision.facelandmarker.FaceLandmarkerResult
 
+private val STEP_LABEL_TO_SOUND: Map<String, String> = mapOf(
+  LivenessStep.TURN_LEFT.label to "left",
+  LivenessStep.BLINK.label to "blink",
+  LivenessStep.TURN_RIGHT.label to "right",
+  LivenessStep.NOD.label to "nod",
+  LivenessStep.MOUTH.label to "mouth",
+)
+
 class LivenessDetector(
   private val context: Context,
   private val listener: LivenessListener,
   private val config: LivenessConfig = LivenessConfig(),
+  private val sounds: LivenessSoundOptions? = null,
 ) : FaceLandmarkerPipeline.Listener {
   private var cameraController: CameraXController? = null
   private var landmarker: FaceLandmarkerPipeline? = null
@@ -26,6 +35,8 @@ class LivenessDetector(
   private var captureDelayRunnable: Runnable? = null
   private var sessionTimeoutRunnable: Runnable? = null
   private var lastOvalState: Boolean? = null
+  private var stepSoundPlayedForCurrentStep = false
+  private val soundPlayer = LivenessSoundPlayer(context, sounds)
 
   fun startLiveness(
     lifecycleOwner: LifecycleOwner,
@@ -38,6 +49,7 @@ class LivenessDetector(
     steps = buildSteps()
     stateMachine = LivenessStateMachine(config, steps)
     stateMachine.reset(nowMs)
+    stepSoundPlayedForCurrentStep = false
     listener.onChallengeChanged(
       0,
       steps.first().label
@@ -62,6 +74,7 @@ class LivenessDetector(
     captureDelayRunnable = null
     sessionTimeoutRunnable?.let { mainHandler.removeCallbacks(it) }
     sessionTimeoutRunnable = null
+    soundPlayer.stop()
     landmarker?.close()
     landmarker = null
     cameraController?.stop()
@@ -97,10 +110,26 @@ class LivenessDetector(
 
     if (!insideOval) return
 
+    if (!stepSoundPlayedForCurrentStep && currentStep != null) {
+      stepSoundPlayedForCurrentStep = true
+      val key = STEP_LABEL_TO_SOUND[currentStep.label]
+      if (key != null) soundPlayer.play(key)
+    }
+
     val update = stateMachine.update(metrics, timestampMs, true)
     when (update) {
       is LivenessUpdate.StepChanged -> {
-        listener.onChallengeChanged(update.stepIndex, update.stepLabel)
+        val onGoodDone = {
+          val key = STEP_LABEL_TO_SOUND[update.stepLabel]
+          if (key != null) soundPlayer.play(key)
+          stepSoundPlayedForCurrentStep = true
+          listener.onChallengeChanged(update.stepIndex, update.stepLabel)
+        }
+        if (soundPlayer.getUrl("good") != null) {
+          soundPlayer.play("good") { mainHandler.post(onGoodDone) }
+        } else {
+          mainHandler.post(onGoodDone)
+        }
       }
       is LivenessUpdate.Failed -> {
         listener.onFailure(update.reason)
@@ -132,9 +161,16 @@ class LivenessDetector(
     captureAttempts = 0
     listener.onChallengeChanged(-1, "Relax and look at the camera")
 
-    val runnable = Runnable { captureActive = true }
-    captureDelayRunnable = runnable
-    mainHandler.postDelayed(runnable, config.captureDelayMs)
+    val startCaptureLoop = {
+      val runnable = Runnable { captureActive = true }
+      captureDelayRunnable = runnable
+      mainHandler.postDelayed(runnable, config.captureDelayMs)
+    }
+    if (soundPlayer.getUrl("capture") != null) {
+      soundPlayer.play("capture") { mainHandler.post(startCaptureLoop) }
+    } else {
+      mainHandler.post(startCaptureLoop)
+    }
   }
 
   private fun attemptCapture(metrics: FaceMetrics) {
