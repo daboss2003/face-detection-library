@@ -216,12 +216,22 @@ export class LivenessEngine {
   private latestMetrics: Metrics | null = null;
   private lastDetectTs   = -1;
   private lastOvalState: boolean | null = null;
+  private stepSoundPlayedForCurrentStep = false;
 
   constructor(private opts: LivenessOptions) {}
 
-  private playSound(url: string): void {
+  private playSound(url: string, onEnded?: () => void): void {
     const a = new Audio(url);
-    a.play().catch(() => {});
+    if (onEnded) {
+      const done = () => {
+        a.removeEventListener("ended", done);
+        a.removeEventListener("error", done);
+        onEnded();
+      };
+      a.addEventListener("ended", done);
+      a.addEventListener("error", done);
+    }
+    a.play().catch(() => onEnded?.());
   }
 
   private getSoundUrl(key: string): string | undefined {
@@ -242,9 +252,10 @@ export class LivenessEngine {
     if (url) this.playSound(url);
   }
 
-  private playGoodSound(): void {
+  private playGoodSound(onEnded?: () => void): void {
     const url = this.getSoundUrl("good");
-    if (url) this.playSound(url);
+    if (url) this.playSound(url, onEnded);
+    else onEnded?.();
   }
 
   private playCaptureSound(): void {
@@ -263,8 +274,8 @@ export class LivenessEngine {
     const now = performance.now();
     this.stepStart = now + config.readyMs;
     this.resetStepState();
+    this.stepSoundPlayedForCurrentStep = false;
     this.opts.callbacks?.onChallengeChanged?.(steps[0].index, steps[0].label);
-    this.playStepSound(steps[0].label);
     await this.ensureVideo();
     this.landmarker = await this.createLandmarker();
     this.loop();
@@ -350,9 +361,15 @@ export class LivenessEngine {
         step: steps[this.stepIndex]?.label ?? "done",
       });
 
-      if (inside && this.updateState(metrics, now) === "passed") {
-        this.scheduleCapture();
-        return;
+      if (inside) {
+        if (!this.stepSoundPlayedForCurrentStep && this.stepIndex < steps.length) {
+          this.stepSoundPlayedForCurrentStep = true;
+          this.playStepSound(steps[this.stepIndex].label);
+        }
+        if (this.updateState(metrics, now) === "passed") {
+          this.scheduleCapture();
+          return;
+        }
       }
     } else {
       if (this.lastOvalState !== false) {
@@ -521,13 +538,16 @@ export class LivenessEngine {
 
   private advanceStep(now: number): "passed" | "none" {
     this.stepIndex += 1;
-    this.playGoodSound();
-    if (this.stepIndex >= steps.length) return "passed";
+    if (this.stepIndex >= steps.length) {
+      this.playGoodSound();
+      return "passed";
+    }
     this.stepStart = now + config.readyMs;
     this.resetStepState();
+    this.stepSoundPlayedForCurrentStep = false;
     const step = steps[this.stepIndex];
     this.opts.callbacks?.onChallengeChanged?.(step.index, step.label);
-    this.playStepSound(step.label);
+    this.playGoodSound(() => this.playStepSound(step.label));
     return "none";
   }
 

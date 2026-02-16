@@ -18,6 +18,15 @@ const OVAL_TOP_PCT = 40;
 const STEP_HINTS = ["left", "blink", "right", "nod", "mouth"] as const;
 type HintKind = (typeof STEP_HINTS)[number];
 
+/** Step label (from engine) → hint icon kind. Use this so the correct icon shows when steps are randomized. */
+const STEP_LABEL_TO_HINT: Record<string, HintKind> = {
+  "Turn your head LEFT":  "left",
+  "Blink":                "blink",
+  "Turn your head RIGHT": "right",
+  "Nod your head":        "nod",
+  "Open your mouth":      "mouth",
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles
 // ─────────────────────────────────────────────────────────────────────────────
@@ -399,9 +408,9 @@ export function startLivenessWithUI(options: StartLivenessOptions): LivenessEngi
     currentStep = stepIndex;
   }
 
-  function setHint(stepIndex: number): void {
+  function setHint(stepIndex: number, stepLabel?: string): void {
     if (stepIndex === -1) return; // capture phase — icon already cleared by setProgress
-    const kind = STEP_HINTS[stepIndex] ?? "left";
+    const kind: HintKind = (stepLabel ? STEP_LABEL_TO_HINT[stepLabel] : undefined) ?? "left";
     hintIcon.innerHTML = hintSvg(kind);
   }
 
@@ -433,7 +442,7 @@ export function startLivenessWithUI(options: StartLivenessOptions): LivenessEngi
     callbacks: {
       onChallengeChanged: (stepIndex, stepLabel) => {
         setProgress(stepIndex);
-        setHint(stepIndex);
+        setHint(stepIndex, stepLabel);
         instruction.textContent = stepLabel;
         // Don't forward the synthetic -1 capture step to the caller
         if (stepIndex >= 0) options.callbacks.onChallengeChanged?.(stepIndex, stepLabel);
@@ -456,8 +465,6 @@ export function startLivenessWithUI(options: StartLivenessOptions): LivenessEngi
       },
     },
   });
-
-  setHint(0);
 
   engine.start().then(
     () => {},
