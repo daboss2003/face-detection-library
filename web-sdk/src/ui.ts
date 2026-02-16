@@ -122,6 +122,8 @@ function createStyles(): HTMLStyleElement {
       stroke-width: 3.5;
       stroke-linecap: round;
       transition: stroke-dashoffset 0.45s cubic-bezier(.4,0,.2,1), stroke 0.25s;
+      transform: rotate(0deg);
+      transform-origin: center;
     }
     .lv-ring-progress.out-of-oval { stroke: var(--lv-red); }
 

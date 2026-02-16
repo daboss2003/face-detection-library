@@ -37,7 +37,7 @@ type BlendshapeCategory  = { categoryName: string; score: number };
 
 type FaceLandmarkerResult = {
   faceLandmarks: NormalizedLandmark[][];
-  facialTransformationMatrixes?: Array<{ data?: number[] | Float32Array } | number[]>;
+  facialTransformationMatrixes?: Array<{ data?: number[] | Float32Array; layout?: number; rows?: number; cols?: number } | number[]>;
   faceBlendshapes?: Array<{ categories: BlendshapeCategory[] }>;
 };
 
@@ -237,9 +237,10 @@ export class LivenessEngine {
     else onEnded?.();
   }
 
-  private playCaptureSound(): void {
+  private playCaptureSound(onEnded?: () => void): void {
     const url = this.getSoundUrl("capture");
-    if (url) this.playSound(url);
+    if (url) this.playSound(url, onEnded);
+    else onEnded?.();
   }
 
   // ── Public ─────────────────────────────────────────────────────────────────
@@ -545,7 +546,6 @@ export class LivenessEngine {
   private scheduleCapture(): void {
     let attempts = 0;
 
-    this.playCaptureSound();
     // Tell the UI to prompt the user to relax their face
     this.opts.callbacks?.onChallengeChanged?.(-1, "Relax and look at the camera");
 
@@ -592,8 +592,13 @@ export class LivenessEngine {
       this.rafId = requestAnimationFrame(tryCapture);
     };
 
-    // Longer delay so the user has time to close their mouth after the last step
-    setTimeout(() => { this.rafId = requestAnimationFrame(tryCapture); }, config.captureDelayMs);
+    const startCaptureLoop = () => {
+      // Short delay so the user has time to close their mouth after the last step
+      setTimeout(() => { this.rafId = requestAnimationFrame(tryCapture); }, config.captureDelayMs);
+    };
+
+    // Play capture sound and only start the capture loop after it finishes
+    this.playCaptureSound(startCaptureLoop);
   }
 
   private captureImage(): void {
@@ -647,19 +652,37 @@ function extractPose(result: FaceLandmarkerResult, lks: NormalizedLandmark[]) {
   const first = Array.isArray(mats) ? mats[0] : undefined;
   const data  = Array.isArray(first) ? first
     : first && "data" in (first as object)
-    ? (first as { data: number[] | Float32Array }).data
+    ? (first as { data?: number[] | Float32Array }).data
+    : undefined;
+  const layout = !Array.isArray(first) && first && "layout" in (first as object)
+    ? (first as { layout?: number }).layout
     : undefined;
 
   if (data && data.length >= 16) {
-    // Column-major 4×4: indices [0,1,2] = col-0 = [r00,r10,r20]
-    //                             [6]   = col-1 row-2 = r21
-    //                             [10]  = col-2 row-2 = r22
-    const r00 = data[0], r10 = data[1], r20 = data[2];
-    const r21 = data[6],  r22 = data[10];
+    // MatrixData is column-major by default; handle row-major if provided.
+    const rowMajor = layout === 1;
+    const r00 = rowMajor ? data[0]  : data[0];
+    const r02 = rowMajor ? data[2]  : data[8];
+    const r10 = rowMajor ? data[4]  : data[1];
+    const r12 = rowMajor ? data[6]  : data[9];
+    const r20 = rowMajor ? data[8]  : data[2];
+    const r22 = rowMajor ? data[10] : data[10];
+
+    // Use the face forward vector (column 2) for stable yaw/pitch.
+    let fx = r02, fy = r12, fz = r22;
+    const fLen = Math.hypot(fx, fy, fz) || 1;
+    fx /= fLen; fy /= fLen; fz /= fLen;
+
+    const yaw   = -Math.atan2(fx, fz); // negative=left, positive=right
+    const pitch = Math.atan2(-fy, Math.hypot(fx, fz)); // negative=up, positive=down
+
+    // Approximate roll from the right vector (column 0).
+    const rLen = Math.hypot(r00, r10, r20) || 1;
+    const roll = Math.atan2(r10 / rLen, r00 / rLen);
     return {
-      yaw:   toDeg(Math.atan2(r10, r00)),
-      pitch: toDeg(Math.asin(Math.max(-1, Math.min(1, -r20)))),
-      roll:  toDeg(Math.atan2(r21, r22)),
+      yaw:   toDeg(yaw),
+      pitch: toDeg(pitch),
+      roll:  toDeg(roll),
     };
   }
 
