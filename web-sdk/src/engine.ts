@@ -352,7 +352,7 @@ export class LivenessEngine {
         delegate: "GPU",
       },
       runningMode: "VIDEO",
-      numFaces: 1,
+      numFaces: 2,
       outputFaceBlendshapes: true,
       outputFacialTransformationMatrixes: true,
     });
@@ -367,8 +367,13 @@ export class LivenessEngine {
     const ts  = now > this.lastDetectTs ? now : this.lastDetectTs + 1;
     this.lastDetectTs = ts;
 
-    const result  = this.landmarker.detectForVideo(this.opts.videoElement, ts);
-    const hasFace = !!(result.faceLandmarks?.length);
+    const result    = this.landmarker.detectForVideo(this.opts.videoElement, ts);
+    const faceCount = result.faceLandmarks?.length ?? 0;
+    if (faceCount > 1) {
+      this.fail("Multiple faces detected. Please ensure only one person is in view.");
+      return;
+    }
+    const hasFace = faceCount > 0;
 
     if (hasFace) {
       const metrics = extractMetrics(result);
@@ -603,7 +608,12 @@ export class LivenessEngine {
       this.lastDetectTs = ts;
 
       const result = this.landmarker.detectForVideo(this.opts.videoElement, ts);
-      if (result.faceLandmarks?.length) {
+      const faceCount = result.faceLandmarks?.length ?? 0;
+      if (faceCount > 1) {
+        this.fail("Multiple faces detected. Please ensure only one person is in view.");
+        return;
+      }
+      if (faceCount > 0) {
         const metrics = extractMetrics(result);
         this.latestMetrics = metrics;
 
