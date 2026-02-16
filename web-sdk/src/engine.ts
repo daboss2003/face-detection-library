@@ -57,15 +57,15 @@ type TasksVisionModule = {
 type LivenessStep = { index: number; label: string };
 
 export type Metrics = {
-  yaw:        number;
-  pitch:      number;
+  yaw:        number;  // degrees, negative=left positive=right
+  pitch:      number;  // degrees, negative=up positive=down
   ear:        number;
   mar:        number;
-  blinkScore: number; // 0=open → 1=closed  (blendshape, preferred)
-  mouthScore: number; // 0=closed → 1=open   (blendshape jawOpen, preferred)
-  faceCx:     number; // raw unmirrored normalised x [0,1]
-  faceCy:     number; // normalised y [0,1]
-  faceSize:   number; // inter-eye distance / video width
+  blinkScore: number;  // 0=open → 1=closed
+  mouthScore: number;  // 0=closed → 1=open
+  faceCx:     number;
+  faceCy:     number;
+  faceSize:   number;
 };
 
 const STEP_LABELS = [
@@ -99,101 +99,74 @@ const steps: LivenessStep[] = shuffleArray(STEP_LABELS).map((label, index) => ({
 export const LIVENESS_STEP_COUNT = steps.length;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Tuning notes (so thresholds are easy to reason about in production):
+//  KEY DESIGN: RELATIVE MEASUREMENT
 //
-//  HEAD TURNS
-//    A relaxed "glance" to the side produces ≈ 13–20° of yaw.
-//    We trigger at 13° and hold for just 150ms — feels instant.
-//    Wrong-direction deadband at 22° prevents neutral jitter from blocking.
+//  Rather than fixed absolute thresholds, the engine samples the user's
+//  resting yaw/pitch at the start of each step (during the readyMs window)
+//  and measures CHANGE FROM THAT BASELINE.
 //
-//  BLINK
-//    blinkScore (eyeBlinkLeft/Right blendshape) peaks ≈ 0.7–1.0 during a blink.
-//    We accept anything > 0.35 as "closed" so even a slow lazy blink counts.
-//    On re-open we check < 0.20 (not 0.15) to reduce the gap between states.
-//    We do NOT require eyes to be "perfectly open" before the blink starts —
-//    the engine only waits for closed→open transition, not open→closed→open.
+//  This fixes the core UX problem: someone sitting slightly turned or with
+//  a slightly tilted monitor should not need to fight their natural position.
 //
-//  NOD
-//    Pitch > 10° = chin dips (nodding down). Much lower than 14°.
-//    Returning to > −8° (almost any upward movement) = nod complete.
-//    This catches small, natural nods rather than exaggerated ones.
+//  Head turn LEFT:  yaw delta < -12° from baseline  (a natural glance)
+//  Head turn RIGHT: yaw delta > +12° from baseline
+//  Nod down:        pitch delta > +10° from baseline (chin dips toward chest)
+//  Nod up return:   pitch delta < +3° (back near starting point, not below it)
 //
-//  MOUTH
-//    jawOpen blendshape > 0.28 is a natural open mouth (saying "ahh" hits 0.6+).
-//    Hold reduced to 120ms — just enough to avoid accidental triggers from speech.
-//
-//  FACE-IN-OVAL
-//    Relaxed ovalRx/Ry so the guard never blocks a valid positioned face.
-//    Head-turn steps skip the x-check (face drifts laterally when turning).
+//  Blink and mouth use blendshapes which are already camera-relative.
 // ─────────────────────────────────────────────────────────────────────────────
 const config = {
-  // Grace period before each step starts evaluating
-  readyMs: 1800,
+  readyMs: 1800,   // ms to sample baseline before evaluating
 
-  // ── Head turns ─────────────────────────────────────────────────────────────
-  // Trigger at 13° — a relaxed glance, not a full head swing
-  yawLeftThreshold:       -13,
-  yawRightThreshold:       13,
-  // Block wrong-direction only if clearly past 22° (absorbs natural drift)
-  wrongDirectionDeadband:  22,
-  // Sustain for 150ms — registers quickly without being jumpy
-  holdMs: 150,
+  // ── Baseline sampling ──────────────────────────────────────────────────────
+  // Number of frames averaged to produce the resting baseline per step
+  baselineFrames: 8,
 
-  // ── Frontal capture guard ──────────────────────────────────────────────────
-  frontalYawThreshold:   18,
-  frontalPitchThreshold: 18,
+  // ── Head turns (relative to baseline) ─────────────────────────────────────
+  yawTurnDelta:           12,   // degrees of YAW change needed from rest
+  yawWrongDirDelta:       16,   // block if turned clearly the WRONG way
+  headTurnHoldMs:        120,   // sustain the turned pose for this long
+
+  // ── Nod (relative to baseline) ────────────────────────────────────────────
+  nodDownDelta:            8,   // chin must DROP by this many degrees from baseline
+  nodReturnFraction:      0.40, // return to 40% of peak nod depth to complete
+  nodReturnMaxDelta:       5,   // cap: never require returning past 5° from baseline
+  maxYawDuringNod:        22,
 
   // ── Blink ──────────────────────────────────────────────────────────────────
-  // Accept any blink where eyes close meaningfully (> 0.35) then reopen (< 0.20)
-  blinkClosedThreshold: 0.35,
-  blinkOpenThreshold:   0.20,
-  // EAR fallback (used only when blendshapes aren't available)
-  earClosedThreshold:   0.20,
-  earOpenThreshold:     0.25,
-  // Max blink duration — 4s is generous; real blinks are 100–400ms
+  blinkClosedThreshold:  0.35,  // blendshape score = eyes closed
+  blinkOpenThreshold:    0.20,  // blendshape score = eyes open
+  earClosedThreshold:    0.20,
+  earOpenThreshold:      0.25,
   blinkMaxDurationMs:   4000,
-  // Don't penalise slight head movement during blink — just wait
-  maxYawDuringBlink:    25,
-  maxPitchDuringBlink:  25,
+  maxYawDuringBlink:     25,
+  maxPitchDuringBlink:   25,
 
   // ── Mouth ──────────────────────────────────────────────────────────────────
-  // 0.28 = mouth clearly open; saying "ah" hits 0.6–0.8
-  mouthOpenBlendshapeThreshold: 0.28,
-  mouthOpenMarThreshold:        0.28,
-  // Short hold to avoid triggering on speech/yawning mid-check
-  mouthHoldMs:  120,
-  maxYawDuringMouth:    25,
-  maxPitchDuringMouth:  25,
-
-  // ── Nod ────────────────────────────────────────────────────────────────────
-  // 10° chin-down = a clear small nod (not a major bow)
-  nodDownThreshold:  10,
-  // Return to any upward position (> −8°) = nod cycle complete
-  nodUpThreshold:    -8,
-  maxYawDuringNod:   25,
+  mouthOpenThreshold:    0.28,  // jawOpen blendshape
+  mouthOpenMarThreshold: 0.28,
+  mouthHoldMs:          120,
+  maxYawDuringMouth:     25,
+  maxPitchDuringMouth:   25,
 
   // ── Face-in-oval ───────────────────────────────────────────────────────────
-  ovalCx: 0.50,
-  ovalCy: 0.42,
-  ovalRx: 0.32,  // generous — guide only, not a pixel-perfect check
-  ovalRy: 0.40,
-  minFaceSize: 0.10,
-  maxFaceSize: 0.62,
+  ovalCx:       0.50,
+  ovalCy:       0.42,
+  ovalRx:       0.32,
+  ovalRy:       0.40,
+  minFaceSize:  0.10,
+  maxFaceSize:  0.62,
   headTurnSteps: new Set(["Turn your head LEFT", "Turn your head RIGHT"]),
 
   // ── Capture ────────────────────────────────────────────────────────────────
-  // Delay after last step — gives user time to relax before snapshot
   captureDelayMs:      700,
   captureMaxAttempts:   90,
-
-  // "Neutral face" requirements for the final image.
-  // User must look normal: no open mouth, no closed eyes, no turned head.
-  captureMaxYaw:          18,   // roughly facing forward
-  captureMaxPitch:        18,
-  captureMaxMouthScore:   0.20, // jawOpen blendshape — mouth must be closed
-  captureMaxBlinkScore:   0.25, // blink blendshape — eyes must be open
-  captureMinEar:          0.22, // EAR fallback for eyes-open check
-  captureMaxMar:          0.22, // MAR fallback for mouth-closed check
+  captureMaxYaw:        18,
+  captureMaxPitch:      18,
+  captureMaxMouthScore: 0.20,
+  captureMaxBlinkScore: 0.25,
+  captureMinEar:        0.22,
+  captureMaxMar:        0.22,
 } as const;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -207,6 +180,11 @@ export class LivenessEngine {
   private stepIndex   = 0;
   private stepStart   = 0;
 
+  // ── Baseline (sampled during readyMs window) ───────────────────────────────
+  private baselineYaw:    number | null = null;
+  private baselinePitch:  number | null = null;
+  private baselineSamples: Array<{ yaw: number; pitch: number }> = [];
+
   // ── Per-step sub-state ─────────────────────────────────────────────────────
   private blinkState:   "waitingClose" | "closed" = "waitingClose";
   private blinkCloseTs  = 0;
@@ -214,6 +192,7 @@ export class LivenessEngine {
   private holdStart:    number | null = null;
 
   private latestMetrics: Metrics | null = null;
+   private nodPeakDPitch: number = 0;
   private lastDetectTs   = -1;
   private lastOvalState: boolean | null = null;
   private stepSoundPlayedForCurrentStep = false;
@@ -350,6 +329,19 @@ export class LivenessEngine {
       const metrics = extractMetrics(result);
       this.latestMetrics = metrics;
 
+      // ── Sample baseline during ready countdown ─────────────────────────────
+      const timeToStart = this.stepStart - now;
+      if (timeToStart > 0 && this.baselineYaw === null) {
+        this.baselineSamples.push({ yaw: metrics.yaw, pitch: metrics.pitch });
+        if (this.baselineSamples.length >= config.baselineFrames) {
+          const yaws   = this.baselineSamples.map(s => s.yaw).sort((a, b) => a - b);
+          const pitches = this.baselineSamples.map(s => s.pitch).sort((a, b) => a - b);
+          const mid = Math.floor(yaws.length / 2);
+          this.baselineYaw   = yaws[mid];
+          this.baselinePitch = pitches[mid];
+        }
+      }
+
       const { inside, reason } = this.checkFaceInOval(metrics);
       if (inside !== this.lastOvalState) {
         this.lastOvalState = inside;
@@ -389,11 +381,9 @@ export class LivenessEngine {
 
   private checkFaceInOval(m: Metrics): { inside: boolean; reason?: string } {
     const isHeadTurn = config.headTurnSteps.has(steps[this.stepIndex]?.label ?? "");
-
-    // MediaPipe → raw unmirrored coords; mirror x to match CSS display
-    const mx = 1 - m.faceCx;
+    const mx = 1 - m.faceCx; // mirror x to match CSS scaleX(-1)
     const dy = (m.faceCy - config.ovalCy) / config.ovalRy;
-    const dx = (mx       - config.ovalCx) / config.ovalRx;
+    const dx = (mx - config.ovalCx) / config.ovalRx;
 
     // During head turns only check vertical position — x drifts intentionally
     const inEllipse = isHeadTurn
@@ -416,41 +406,43 @@ export class LivenessEngine {
   // ── State machine ──────────────────────────────────────────────────────────
 
   private resetStepState(): void {
-    this.blinkState   = "waitingClose";
-    this.blinkCloseTs = 0;
-    this.nodState     = "neutral";
-    this.holdStart    = null;
+    this.blinkState      = "waitingClose";
+    this.blinkCloseTs    = 0;
+    this.nodState        = "neutral";
+    this.holdStart       = null;
+    this.baselineYaw     = null;
+    this.baselinePitch   = null;
+    this.baselineSamples = [];
   }
 
   private updateState(metrics: Metrics, now: number): "passed" | "none" {
-    if (now < this.stepStart) return "none"; // still in ready countdown
+    if (now < this.stepStart) return "none"; // in ready countdown
+
+    const bYaw   = this.baselineYaw   ?? metrics.yaw;
+    const bPitch = this.baselinePitch ?? metrics.pitch;
+    const dYaw   = metrics.yaw   - bYaw;
+    const dPitch = metrics.pitch - bPitch;
 
     switch (steps[this.stepIndex].label) {
 
-      // ── LEFT turn ──────────────────────────────────────────────────────────
+      // ── LEFT turn (negative yaw delta = turning left from rest) ─────────────
       case "Turn your head LEFT": {
-        if (metrics.yaw > config.wrongDirectionDeadband) {
-          this.holdStart = null;
-          return "none";
-        }
-        if (metrics.yaw < config.yawLeftThreshold) {
+        if (dYaw > config.yawWrongDirDelta) { this.holdStart = null; return "none"; }
+        if (dYaw < -config.yawTurnDelta) {
           if (this.holdStart === null) this.holdStart = now;
-          if (now - this.holdStart >= config.holdMs) return this.advanceStep(now);
+          if (now - this.holdStart >= config.headTurnHoldMs) return this.advanceStep(now);
         } else {
           this.holdStart = null;
         }
         break;
       }
 
-      // ── RIGHT turn ─────────────────────────────────────────────────────────
+      // ── RIGHT turn (positive yaw delta = turning right from rest) ──────────
       case "Turn your head RIGHT": {
-        if (metrics.yaw < -config.wrongDirectionDeadband) {
-          this.holdStart = null;
-          return "none";
-        }
-        if (metrics.yaw > config.yawRightThreshold) {
+        if (dYaw < -config.yawWrongDirDelta) { this.holdStart = null; return "none"; }
+        if (dYaw > config.yawTurnDelta) {
           if (this.holdStart === null) this.holdStart = now;
-          if (now - this.holdStart >= config.holdMs) return this.advanceStep(now);
+          if (now - this.holdStart >= config.headTurnHoldMs) return this.advanceStep(now);
         } else {
           this.holdStart = null;
         }
@@ -459,14 +451,9 @@ export class LivenessEngine {
 
       // ── BLINK ──────────────────────────────────────────────────────────────
       case "Blink": {
-        // Allow minor head movement — a real blink often causes a tiny head shift
-        if (Math.abs(metrics.yaw) > config.maxYawDuringBlink ||
-            Math.abs(metrics.pitch) > config.maxPitchDuringBlink) {
-          // Don't reset blink state — just pause until they face forward again
-          return "none";
-        }
+        if (Math.abs(metrics.yaw)   > config.maxYawDuringBlink ||
+            Math.abs(metrics.pitch) > config.maxPitchDuringBlink) return "none";
 
-        // Prefer blendshape score; fall back to EAR
         const isEyeClosed = metrics.blinkScore > 0
           ? metrics.blinkScore > config.blinkClosedThreshold
           : metrics.ear < config.earClosedThreshold;
@@ -476,39 +463,36 @@ export class LivenessEngine {
           : metrics.ear > config.earOpenThreshold;
 
         if (this.blinkState === "waitingClose" && isEyeClosed) {
-          // Eyes just closed — start timing
-          this.blinkState  = "closed";
+          this.blinkState   = "closed";
           this.blinkCloseTs = now;
-        } else if (this.blinkState === "closed") {
-          if (isEyeOpen) {
-            // Complete blink: closed → open
-            const dur = now - this.blinkCloseTs;
-            if (dur <= config.blinkMaxDurationMs) {
-              return this.advanceStep(now);
-            }
-            // Held too long (e.g. eyes were stuck) — reset and wait for a fresh blink
-            this.blinkState = "waitingClose";
-          }
-          // Still closed — keep waiting for reopening, no timeout pressure
+        } else if (this.blinkState === "closed" && isEyeOpen) {
+          if (now - this.blinkCloseTs <= config.blinkMaxDurationMs) return this.advanceStep(now);
+          this.blinkState = "waitingClose";
         }
         break;
       }
 
-      // ── NOD ────────────────────────────────────────────────────────────────
+      // ── NOD (dPitch > 0 = chin dropping; completion = back within nodReturnDelta) ─
       case "Nod your head": {
-        // Allow some yaw during a nod — people naturally do both
-        if (Math.abs(metrics.yaw) > config.maxYawDuringNod) return "none";
+        if (Math.abs(dYaw) > config.maxYawDuringNod) return "none";
 
         if (this.nodState === "neutral") {
-          // Wait for chin to dip
-          if (metrics.pitch > config.nodDownThreshold) {
-            this.nodState = "down";
+          if (dPitch > config.nodDownDelta) {
+            this.nodState      = "down";
+            this.nodPeakDPitch = dPitch;
           }
         } else if (this.nodState === "down") {
-          // Wait for head to come back up — any upward movement counts
-          if (metrics.pitch < config.nodUpThreshold) {
-            return this.advanceStep(now);
-          }
+          // Keep updating peak in case they nod deeper
+          if (dPitch > this.nodPeakDPitch) this.nodPeakDPitch = dPitch;
+
+          // Return target: proportional to how deep they nodded,
+          // capped so a very deep nod doesn't need a huge return
+          const returnTarget = Math.min(
+            this.nodPeakDPitch * config.nodReturnFraction,
+            config.nodReturnMaxDelta
+          );
+
+          if (dPitch < returnTarget) return this.advanceStep(now);
         }
         break;
       }
@@ -519,7 +503,7 @@ export class LivenessEngine {
             Math.abs(metrics.pitch) > config.maxPitchDuringMouth) return "none";
 
         const isMouthOpen = metrics.mouthScore > 0
-          ? metrics.mouthScore > config.mouthOpenBlendshapeThreshold
+          ? metrics.mouthScore > config.mouthOpenThreshold
           : metrics.mar > config.mouthOpenMarThreshold;
 
         if (isMouthOpen) {

@@ -132,6 +132,14 @@ video {
       <span id="m-pitch" class="value">—</span>
     </div>
     <div class="metric-row">
+      <span class="label">dPITCH from baseline (nod delta)</span>
+      <span id="m-dpitch" class="value">—</span>
+    </div>
+    <div class="metric-row">
+      <span class="label">Nod baseline pitch</span>
+      <span id="m-bpitch" class="value">—</span>
+    </div>
+    <div class="metric-row">
       <span class="label">BLINK score (0=open 1=closed)</span>
       <span id="m-blink" class="value">—</span>
     </div>
@@ -179,7 +187,7 @@ const WASM_URL  = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/w
 const cfg = {
   ovalCx: 0.50, ovalCy: 0.40, ovalRx: 0.24, ovalRy: 0.32,
   minFaceSize: 0.16, maxFaceSize: 0.52,
-  yawLeft: -18, yawRight: 18, wrongDeadband: 28,
+  yawLeft: -22, yawRight: 22, wrongDeadband: 28,
   blinkClosed: 0.40, blinkOpen: 0.15,
   mouthOpen: 0.35,
 };
@@ -336,13 +344,34 @@ function loop() {
   }
 
   // Metric display
-  const yawClass = Math.abs(yaw) < 10 ? "ok" : Math.abs(yaw) < 18 ? "warn" : "bad";
+  const yawClass = Math.abs(yaw) < 10 ? "ok" : Math.abs(yaw) < 22 ? "warn" : "bad";
   el("yaw").className   = `value ${yawClass}`;
-  el("yaw").textContent = `${yaw.toFixed(1)}°  (left<-18 | right>18)`;
+  el("yaw").textContent = `${yaw.toFixed(1)}°  (left<-22 | right>22)`;
 
   const pitchClass = Math.abs(pitch) < 10 ? "ok" : Math.abs(pitch) < 20 ? "warn" : "bad";
   el("pitch").className   = `value ${pitchClass}`;
   el("pitch").textContent = `${pitch.toFixed(1)}°`;
+
+  // Nod baseline (sampled over first 8 frames when no baseline yet)
+  if (!window._nodBaseline) {
+    if (!window._nodSamples) window._nodSamples = [];
+    window._nodSamples.push(pitch);
+    if (window._nodSamples.length >= 8) {
+      const sorted = [...window._nodSamples].sort((a,b) => a-b);
+      window._nodBaseline = sorted[Math.floor(sorted.length/2)];
+    }
+  }
+  const bPitch = window._nodBaseline ?? pitch;
+  const dPitch = pitch - bPitch;
+  const nodPeak = window._nodPeak ?? 0;
+  if (dPitch > nodPeak) window._nodPeak = dPitch;
+  const returnTarget = Math.min(nodPeak * 0.40, 5);
+
+  const dPitchClass = dPitch > 8 ? "bad" : dPitch > 3 ? "warn" : "ok";
+  el("dpitch").className   = `value ${dPitchClass}`;
+  el("dpitch").textContent = `${dPitch.toFixed(1)}°  (need >8° down, return <${returnTarget.toFixed(1)}°)  peak=${nodPeak.toFixed(1)}°`;
+  el("bpitch").className   = "value ok";
+  el("bpitch").textContent = `${bPitch.toFixed(1)}°  (${window._nodBaseline ? "captured" : "sampling..."})`;
 
   const blinkClass = blinkScore < 0.15 ? "ok" : blinkScore > 0.40 ? "bad" : "warn";
   el("blink").className   = `value ${blinkClass}`;

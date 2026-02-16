@@ -12,11 +12,14 @@ export type StartLivenessOptions = {
 // ── Oval dimensions — keep in sync with engine.ts config.ovalCx/Cy/Rx/Ry ──
 const OVAL_W = 270;
 const OVAL_H = 360;
-// The oval sits at 40% from the top of the screen
 const OVAL_TOP_PCT = 40;
 
-const STEP_HINTS = ["left", "blink", "right", "nod", "mouth"] as const;
-type HintKind = (typeof STEP_HINTS)[number];
+// Approximate ellipse perimeter via Ramanujan's formula so pathLength matches
+const RX = OVAL_W / 2 - 2;
+const RY = OVAL_H / 2 - 2;
+const ELLIPSE_PERIMETER = Math.PI * (3 * (RX + RY) - Math.sqrt((3 * RX + RY) * (RX + 3 * RY)));
+
+type HintKind = "left" | "blink" | "right" | "nod" | "mouth";
 
 /** Step label (from engine) → hint icon kind. Use this so the correct icon shows when steps are randomized. */
 const STEP_LABEL_TO_HINT: Record<string, HintKind> = {
@@ -107,31 +110,20 @@ function createStyles(): HTMLStyleElement {
       height: min(90vw, ${OVAL_H}px);
       pointer-events: none;
     }
-    .lv-ring-wrap svg {
-      width: 100%;
-      height: 100%;
-      overflow: visible;
-      /* Rotate so stroke starts at the top */
-      transform: rotate(-90deg);
-    }
-    .lv-ring-bg {
+    .lv-ring-wrap svg { width: 100%; height: 100%; overflow: visible; }
+    .lv-ring-track {
       fill: none;
-      stroke: rgba(255,255,255,0.18);
-      stroke-width: 3;
+      stroke: rgba(255,255,255,0.15);
+      stroke-width: 3.5;
     }
     .lv-ring-progress {
       fill: none;
       stroke: var(--lv-green);
-      stroke-width: 3;
+      stroke-width: 3.5;
       stroke-linecap: round;
-      stroke-dasharray: 100;
-      stroke-dashoffset: 100;
-      transition: stroke-dashoffset 0.35s cubic-bezier(.4,0,.2,1),
-                  stroke 0.25s;
+      transition: stroke-dashoffset 0.45s cubic-bezier(.4,0,.2,1), stroke 0.25s;
     }
-    .lv-ring-progress.out-of-oval {
-      stroke: var(--lv-red);
-    }
+    .lv-ring-progress.out-of-oval { stroke: var(--lv-red); }
 
     /* ── Top header bar ──────────────────────────────────────────────────── */
     .lv-header {
@@ -155,33 +147,25 @@ function createStyles(): HTMLStyleElement {
     .lv-dots {
       position: absolute;
       z-index: 2;
-      top: calc(${OVAL_TOP_PCT}% + min(45vw, ${OVAL_H / 2}px) + 18px);
+      top: calc(${OVAL_TOP_PCT}% + min(45vw, ${OVAL_H / 2}px) + 20px);
       left: 50%;
       transform: translateX(-50%);
       display: flex;
-      gap: 7px;
+      gap: 8px;
     }
     .lv-dot {
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-      background: rgba(255,255,255,0.25);
+      width: 7px; height: 7px; border-radius: 50%;
+      background: rgba(255,255,255,0.2);
       transition: background 0.3s, transform 0.3s;
     }
-    .lv-dot.active {
-      background: var(--lv-green);
-      transform: scale(1.25);
-    }
-    .lv-dot.done {
-      background: var(--lv-green);
-      opacity: 0.55;
-    }
+    .lv-dot.active { background: var(--lv-green); transform: scale(1.3); }
+    .lv-dot.done  { background: var(--lv-green); opacity: .5; transform: scale(1); }
 
     /* ── Instruction text ────────────────────────────────────────────────── */
     .lv-instruction {
       position: absolute;
       z-index: 2;
-      top: calc(${OVAL_TOP_PCT}% + min(45vw, ${OVAL_H / 2}px) + 48px);
+      top: calc(${OVAL_TOP_PCT}% + min(45vw, ${OVAL_H / 2}px) + 52px);
       left: 50%;
       transform: translateX(-50%);
       white-space: nowrap;
@@ -194,10 +178,10 @@ function createStyles(): HTMLStyleElement {
     }
 
     /* ── "Move closer / centre your face" hint ───────────────────────────── */
-    .lv-position-hint {
+    .lv-pos-hint {
       position: absolute;
       z-index: 2;
-      top: calc(${OVAL_TOP_PCT}% + min(45vw, ${OVAL_H / 2}px) + 82px);
+      top: calc(${OVAL_TOP_PCT}% + min(45vw, ${OVAL_H / 2}px) + 84px);
       left: 50%;
       transform: translateX(-50%);
       font-size: 13px;
@@ -209,9 +193,7 @@ function createStyles(): HTMLStyleElement {
       transition: opacity 0.3s;
       pointer-events: none;
     }
-    .lv-position-hint.visible {
-      opacity: 1;
-    }
+    .lv-pos-hint.visible { opacity: 1; }
 
     /* ── Animated gesture icon ───────────────────────────────────────────── */
     .lv-hint-icon {
@@ -249,15 +231,12 @@ function createStyles(): HTMLStyleElement {
     .lv-eye        { animation: lv-blink 2s ease-in-out infinite; transform-origin: center; }
     .lv-jaw        { animation: lv-mouth 1.5s ease-in-out infinite; transform-origin: top center; }
 
-    /* ── Capture phase ring pulse ────────────────────────────────────────── */
-    @keyframes lv-ring-pulse {
-      0%, 100% { opacity: 1; stroke-width: 3; }
-      50%       { opacity: 0.5; stroke-width: 4.5; }
+    /* ── Capture pulse ──────────────────────────────────────────────────── */
+    @keyframes lv-pulse {
+      0%,100% { stroke-width: 3.5; opacity: 1; }
+      50%     { stroke-width: 5;   opacity: 0.55; }
     }
-    .lv-ring-pulse {
-      animation: lv-ring-pulse 1s ease-in-out infinite;
-      stroke: var(--lv-green) !important;
-    }
+    .lv-ring-pulse { animation: lv-pulse 1s ease-in-out infinite; stroke: var(--lv-green) !important; }
 
     /* ── Hidden canvas for capture ───────────────────────────────────────── */
     .lv-canvas {
@@ -275,31 +254,14 @@ function createStyles(): HTMLStyleElement {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function hintSvg(kind: HintKind): string {
-  const stroke = `stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"`;
+  const sk = `stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"`;
   switch (kind) {
-    case "left":
-      return `<svg viewBox="0 0 24 24" fill="none" ${stroke} class="lv-anim-left">
-        <path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/>
-      </svg>`;
-    case "right":
-      return `<svg viewBox="0 0 24 24" fill="none" ${stroke} class="lv-anim-right">
-        <path d="M5 12h14"/><path d="M12 5l7 7-7 7"/>
-      </svg>`;
-    case "nod":
-      return `<svg viewBox="0 0 24 24" fill="none" ${stroke} class="lv-anim-down">
-        <path d="M12 5v14"/><path d="M19 12l-7 7-7-7"/>
-      </svg>`;
-    case "blink":
-      return `<svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2">
-        <ellipse class="lv-eye" cx="8"  cy="12" rx="2" ry="2.5"/>
-        <ellipse class="lv-eye" cx="16" cy="12" rx="2" ry="2.5" style="animation-delay:.08s"/>
-      </svg>`;
-    case "mouth":
-      return `<svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round">
-        <path class="lv-jaw" d="M6 10 Q12 17 18 10"/>
-      </svg>`;
-    default:
-      return "";
+    case "left":  return `<svg viewBox="0 0 24 24" fill="none" ${sk} class="lv-anim-left"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg>`;
+    case "right": return `<svg viewBox="0 0 24 24" fill="none" ${sk} class="lv-anim-right"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>`;
+    case "nod":   return `<svg viewBox="0 0 24 24" fill="none" ${sk} class="lv-anim-down"><path d="M12 5v14"/><path d="M19 12l-7 7-7-7"/></svg>`;
+    case "blink": return `<svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><ellipse class="lv-eye" cx="8" cy="12" rx="2" ry="2.5"/><ellipse class="lv-eye" cx="16" cy="12" rx="2" ry="2.5" style="animation-delay:.08s"/></svg>`;
+    case "mouth": return `<svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round"><path class="lv-jaw" d="M6 10 Q12 17 18 10"/></svg>`;
+    default:      return "";
   }
 }
 
@@ -331,14 +293,21 @@ export function startLivenessWithUI(options: StartLivenessOptions): LivenessEngi
   overlay.className = "lv-overlay";
   root.appendChild(overlay);
 
-  // ── Progress ring (SVG oval) ───────────────────────────────────────────────
+  // ── Progress ring (ellipse pathLength = perimeter so dash offset matches) ───
   const rx = OVAL_W / 2, ry = OVAL_H / 2;
   const ringWrap = document.createElement("div");
   ringWrap.className = "lv-ring-wrap";
   ringWrap.innerHTML = `
     <svg viewBox="0 0 ${OVAL_W} ${OVAL_H}">
-      <ellipse class="lv-ring-bg"       cx="${rx}" cy="${ry}" rx="${rx - 2}" ry="${ry - 2}" pathLength="100"/>
-      <ellipse class="lv-ring-progress" cx="${rx}" cy="${ry}" rx="${rx - 2}" ry="${ry - 2}" pathLength="100"/>
+      <ellipse class="lv-ring-track"
+        cx="${rx}" cy="${ry}" rx="${RX}" ry="${RY}"
+        pathLength="${ELLIPSE_PERIMETER.toFixed(1)}"/>
+      <ellipse class="lv-ring-progress"
+        cx="${rx}" cy="${ry}" rx="${RX}" ry="${RY}"
+        pathLength="${ELLIPSE_PERIMETER.toFixed(1)}"
+        stroke-dasharray="${ELLIPSE_PERIMETER.toFixed(1)}"
+        stroke-dashoffset="${ELLIPSE_PERIMETER.toFixed(1)}"
+        transform="rotate(-90 ${rx} ${ry})"/>
     </svg>`;
   root.appendChild(ringWrap);
 
@@ -372,8 +341,7 @@ export function startLivenessWithUI(options: StartLivenessOptions): LivenessEngi
 
   // ── Position hint (shows when face is out of oval) ─────────────────────────
   const posHint = document.createElement("div");
-  posHint.className = "lv-position-hint";
-  posHint.textContent = "Move your face into the oval";
+  posHint.className = "lv-pos-hint";
   root.appendChild(posHint);
 
   // ── Hidden canvas ──────────────────────────────────────────────────────────
@@ -383,43 +351,42 @@ export function startLivenessWithUI(options: StartLivenessOptions): LivenessEngi
 
   container.appendChild(root);
 
-  // ── Helper refs ────────────────────────────────────────────────────────────
-  const ringProgress = ringWrap.querySelector(".lv-ring-progress") as SVGElement;
+  const ringEl = ringWrap.querySelector(".lv-ring-progress") as SVGEllipseElement | null;
   const dots = Array.from(dotsEl.querySelectorAll(".lv-dot"));
+  const P = ELLIPSE_PERIMETER;
 
-  // ── UI update helpers ──────────────────────────────────────────────────────
-  let currentStep = 0;
+  // ── UI helpers ──────────────────────────────────────────────────────────────
 
-  function setProgress(stepIndex: number): void {
-    // stepIndex -1 = capture/relax phase — keep ring full, pulse it
-    if (stepIndex === -1) {
-      ringProgress?.setAttribute("stroke-dashoffset", "0");
-      ringProgress?.classList.add("lv-ring-pulse");
-      hintIcon.innerHTML = ""; // hide gesture icon during capture
-      return;
-    }
-    ringProgress?.classList.remove("lv-ring-pulse");
-    const pct = Math.min(stepIndex / LIVENESS_STEP_COUNT, 1);
-    ringProgress?.setAttribute("stroke-dashoffset", String(100 - pct * 100));
-    dots.forEach((d, i) => {
-      d.classList.toggle("done",   i < stepIndex);
-      d.classList.toggle("active", i === stepIndex);
-    });
-    currentStep = stepIndex;
+  function setProgress(completedSteps: number): void {
+    if (!ringEl) return;
+    const filled = Math.min(completedSteps / LIVENESS_STEP_COUNT, 1);
+    const offset = P * (1 - filled);
+    ringEl.setAttribute("stroke-dashoffset", offset.toFixed(1));
   }
 
-  function setHint(stepIndex: number, stepLabel?: string): void {
-    if (stepIndex === -1) return; // capture phase — icon already cleared by setProgress
-    const kind: HintKind = (stepLabel ? STEP_LABEL_TO_HINT[stepLabel] : undefined) ?? "left";
-    hintIcon.innerHTML = hintSvg(kind);
+  function setCapturePulse(): void {
+    ringEl?.classList.add("lv-ring-pulse");
+    ringEl?.setAttribute("stroke-dashoffset", "0");
+  }
+
+  function setHint(stepLabel: string | null): void {
+    if (!stepLabel) { hintIcon.innerHTML = ""; return; }
+    const kind = STEP_LABEL_TO_HINT[stepLabel];
+    hintIcon.innerHTML = kind ? hintSvg(kind) : "";
+  }
+
+  function setDots(activeIndex: number): void {
+    dots.forEach((d, i) => {
+      d.classList.toggle("done",   i < activeIndex);
+      d.classList.toggle("active", i === activeIndex);
+    });
   }
 
   function setFaceInOval(inside: boolean, reason?: string): void {
     overlay.classList.toggle("out-of-oval", !inside);
-    ringProgress?.classList.toggle("out-of-oval", !inside);
+    ringEl?.classList.toggle("out-of-oval", !inside);
     posHint.classList.toggle("visible", !inside);
-    if (!inside && reason) posHint.textContent = reason;
-    else if (inside) posHint.textContent = "";
+    posHint.textContent = inside ? "" : (reason ?? "Move your face into the oval");
   }
 
   function cleanup(): void {
@@ -441,11 +408,20 @@ export function startLivenessWithUI(options: StartLivenessOptions): LivenessEngi
     sounds,
     callbacks: {
       onChallengeChanged: (stepIndex, stepLabel) => {
+        if (stepIndex === -1) {
+          setProgress(LIVENESS_STEP_COUNT);
+          setCapturePulse();
+          setHint(null);
+          setDots(LIVENESS_STEP_COUNT);
+          instruction.textContent = stepLabel;
+          return;
+        }
         setProgress(stepIndex);
-        setHint(stepIndex, stepLabel);
+        setDots(stepIndex);
+        setHint(stepLabel);
         instruction.textContent = stepLabel;
-        // Don't forward the synthetic -1 capture step to the caller
-        if (stepIndex >= 0) options.callbacks.onChallengeChanged?.(stepIndex, stepLabel);
+        ringEl?.classList.remove("lv-ring-pulse");
+        options.callbacks.onChallengeChanged?.(stepIndex, stepLabel);
       },
       onFaceInOval: (inside, reason) => {
         setFaceInOval(inside, reason);
@@ -465,6 +441,10 @@ export function startLivenessWithUI(options: StartLivenessOptions): LivenessEngi
       },
     },
   });
+
+  setProgress(0);
+  setDots(0);
+  setHint(null);
 
   engine.start().then(
     () => {},
