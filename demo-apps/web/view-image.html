@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>View captured image</title>
+  <style>
+    body { font-family: system-ui; padding: 1rem; background: #1a1a1a; color: #eee; }
+    img { max-width: 100%; height: auto; border-radius: 8px; }
+    .error { color: #f88; }
+  </style>
+</head>
+<body>
+  <h1>Captured liveness image</h1>
+  <p>Shows the image captured after liveness verification (or from <code>temp.txt</code> if opened directly).</p>
+  <img id="img" alt="Captured face" />
+  <p id="msg" class="error"></p>
+  <script>
+    (function () {
+      const msg = document.getElementById("msg");
+      const img = document.getElementById("img");
+
+      function showImage(base64) {
+        const trimmed = (base64 || "").trim();
+        if (!trimmed) {
+          msg.textContent = "No image data.";
+          return;
+        }
+        img.src = "data:image/jpeg;base64," + trimmed;
+        msg.textContent = "";
+      }
+
+      const fromStorage = sessionStorage.getItem("livenessImageBase64");
+      if (fromStorage) {
+        showImage(fromStorage);
+        sessionStorage.removeItem("livenessImageBase64");
+        return;
+      }
+
+      fetch("temp.txt")
+        .then(function (r) { return r.text(); })
+        .then(showImage)
+        .catch(function () {
+          msg.textContent = "No image from verification and temp.txt could not be loaded. Complete liveness from the demo to see the image here.";
+        });
+    })();
+  </script>
+</body>
+</html>

@@ -2,13 +2,7 @@ export type LivenessCallbacks = {
   onChallengeChanged?: (stepIndex: number, stepLabel: string) => void;
   onFailure?: (reason: string) => void;
   onSuccess?: (imageBase64: string) => void;
-  /**
-   * Called when face enters/leaves the oval, with a human-readable reason
-   * when outside so the UI can give specific guidance.
-   * reason is undefined when inside === true.
-   */
   onFaceInOval?: (inside: boolean, reason?: string) => void;
-  /** Per-frame debug hook */
   onDebugFrame?: (info: { hasFace: boolean; metrics: Metrics | null; step: string }) => void;
 };
 
@@ -26,7 +20,7 @@ export const DEFAULT_MODEL_URL =
 export const DEFAULT_WASM_URL =
   "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm";
 
-type NormalizedLandmark = { x: number; y: number; z: number };
+type NormalizedLandmark  = { x: number; y: number; z: number };
 type BlendshapeCategory  = { categoryName: string; score: number };
 
 type FaceLandmarkerResult = {
@@ -40,10 +34,10 @@ type FaceLandmarker = {
   close: () => void;
 };
 
-type FilesetResolver  = { forVisionTasks: (wasmUrl: string) => Promise<unknown> };
+type FilesetResolver   = { forVisionTasks: (wasmUrl: string) => Promise<unknown> };
 type TasksVisionModule = {
   FaceLandmarker: {
-    createFromOptions: (vision: unknown, options: Record<string, unknown>) => Promise<FaceLandmarker>;
+    createFromOptions: (vision: unknown, opts: Record<string, unknown>) => Promise<FaceLandmarker>;
   };
   FilesetResolver: FilesetResolver;
 };
@@ -51,15 +45,15 @@ type TasksVisionModule = {
 type LivenessStep = { index: number; label: string };
 
 export type Metrics = {
-  yaw: number;
-  pitch: number;
-  ear: number;
-  mar: number;
-  blinkScore: number;
-  mouthScore: number;
-  faceCx: number;   // raw (unmirrored) normalised x centre [0,1]
-  faceCy: number;   // normalised y centre [0,1]
-  faceSize: number; // inter-eye distance / video width
+  yaw:        number;
+  pitch:      number;
+  ear:        number;
+  mar:        number;
+  blinkScore: number; // 0=open → 1=closed  (blendshape, preferred)
+  mouthScore: number; // 0=closed → 1=open   (blendshape jawOpen, preferred)
+  faceCx:     number; // raw unmirrored normalised x [0,1]
+  faceCy:     number; // normalised y [0,1]
+  faceSize:   number; // inter-eye distance / video width
 };
 
 const steps: LivenessStep[] = [
@@ -72,75 +66,105 @@ const steps: LivenessStep[] = [
 
 export const LIVENESS_STEP_COUNT = steps.length;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Tuning notes (so thresholds are easy to reason about in production):
+//
+//  HEAD TURNS
+//    A relaxed "glance" to the side produces ≈ 13–20° of yaw.
+//    We trigger at 13° and hold for just 150ms — feels instant.
+//    Wrong-direction deadband at 22° prevents neutral jitter from blocking.
+//
+//  BLINK
+//    blinkScore (eyeBlinkLeft/Right blendshape) peaks ≈ 0.7–1.0 during a blink.
+//    We accept anything > 0.35 as "closed" so even a slow lazy blink counts.
+//    On re-open we check < 0.20 (not 0.15) to reduce the gap between states.
+//    We do NOT require eyes to be "perfectly open" before the blink starts —
+//    the engine only waits for closed→open transition, not open→closed→open.
+//
+//  NOD
+//    Pitch > 10° = chin dips (nodding down). Much lower than 14°.
+//    Returning to > −8° (almost any upward movement) = nod complete.
+//    This catches small, natural nods rather than exaggerated ones.
+//
+//  MOUTH
+//    jawOpen blendshape > 0.28 is a natural open mouth (saying "ahh" hits 0.6+).
+//    Hold reduced to 120ms — just enough to avoid accidental triggers from speech.
+//
+//  FACE-IN-OVAL
+//    Relaxed ovalRx/Ry so the guard never blocks a valid positioned face.
+//    Head-turn steps skip the x-check (face drifts laterally when turning).
+// ─────────────────────────────────────────────────────────────────────────────
 const config = {
-  readyMs: 2000,
+  // Grace period before each step starts evaluating
+  readyMs: 1800,
 
-  // ── Head turn ──────────────────────────────────────────────────────────────
-  yawLeftThreshold:      -18,
-  yawRightThreshold:        18,
-  wrongDirectionDeadband: 28,
-  holdMs: 250,
+  // ── Head turns ─────────────────────────────────────────────────────────────
+  // Trigger at 13° — a relaxed glance, not a full head swing
+  yawLeftThreshold:       -13,
+  yawRightThreshold:       13,
+  // Block wrong-direction only if clearly past 22° (absorbs natural drift)
+  wrongDirectionDeadband:  22,
+  // Sustain for 150ms — registers quickly without being jumpy
+  holdMs: 150,
 
   // ── Frontal capture guard ──────────────────────────────────────────────────
-  frontalYawThreshold:   15,
-  frontalPitchThreshold: 15,
+  frontalYawThreshold:   18,
+  frontalPitchThreshold: 18,
 
   // ── Blink ──────────────────────────────────────────────────────────────────
-  blinkClosedThreshold: 0.40,
-  blinkOpenThreshold:   0.15,
-  earClosedThreshold:   0.18,
-  earOpenThreshold:     0.23,
-  blinkMaxDurationMs:   3000,
-  maxYawDuringBlink:    20,
-  maxPitchDuringBlink:  20,
+  // Accept any blink where eyes close meaningfully (> 0.35) then reopen (< 0.20)
+  blinkClosedThreshold: 0.35,
+  blinkOpenThreshold:   0.20,
+  // EAR fallback (used only when blendshapes aren't available)
+  earClosedThreshold:   0.20,
+  earOpenThreshold:     0.25,
+  // Max blink duration — 4s is generous; real blinks are 100–400ms
+  blinkMaxDurationMs:   4000,
+  // Don't penalise slight head movement during blink — just wait
+  maxYawDuringBlink:    25,
+  maxPitchDuringBlink:  25,
 
   // ── Mouth ──────────────────────────────────────────────────────────────────
-  mouthOpenBlendshapeThreshold: 0.35,
-  mouthOpenMarThreshold:        0.30,
-  maxYawDuringMouth:  20,
-  maxPitchDuringMouth: 20,
+  // 0.28 = mouth clearly open; saying "ah" hits 0.6–0.8
+  mouthOpenBlendshapeThreshold: 0.28,
+  mouthOpenMarThreshold:        0.28,
+  // Short hold to avoid triggering on speech/yawning mid-check
+  mouthHoldMs:  120,
+  maxYawDuringMouth:    25,
+  maxPitchDuringMouth:  25,
 
-  // ── Nod ───────────────────────────────────────────────────────────────────
-  nodDownThreshold: 14,
-  nodUpThreshold:   -3,
-  maxYawDuringNod:  20,
+  // ── Nod ────────────────────────────────────────────────────────────────────
+  // 10° chin-down = a clear small nod (not a major bow)
+  nodDownThreshold:  10,
+  // Return to any upward position (> −8°) = nod cycle complete
+  nodUpThreshold:    -8,
+  maxYawDuringNod:   25,
 
   // ── Face-in-oval ───────────────────────────────────────────────────────────
-  /**
-   * The oval is centred at 50% x, 40% y of the **video** frame.
-   * These are in normalised [0,1] video coordinates (not screen pixels).
-   *
-   * NOTE: the video is CSS-mirrored for display. MediaPipe gives raw
-   * (unmirrored) coords. We flip x before the ellipse test.
-   *
-   * The rx/ry values are intentionally relaxed (larger than the visual oval)
-   * so the check doesn't block users who are slightly off-centre. The visual
-   * oval in the UI is just a guide — we don't need pixel-perfect alignment.
-   */
   ovalCx: 0.50,
-  ovalCy: 0.42,   // slightly below centre — faces tend to sit a bit lower
-  ovalRx: 0.30,   // relaxed from 0.24 — was blocking valid faces
-  ovalRy: 0.38,   // relaxed from 0.32
-
-  /**
-   * Face size = inter-eye distance / video width.
-   * Comfortable desktop: 0.15–0.50
-   * Mobile portrait:     0.20–0.55
-   * Use a wide range so we don't fail on different camera distances.
-   */
-  minFaceSize: 0.12,
-  maxFaceSize: 0.58,
-
-  /**
-   * Steps where the head turns away from centre — oval containment is
-   * relaxed for x-axis during these steps because the face SHOULD drift.
-   */
+  ovalCy: 0.42,
+  ovalRx: 0.32,  // generous — guide only, not a pixel-perfect check
+  ovalRy: 0.40,
+  minFaceSize: 0.10,
+  maxFaceSize: 0.62,
   headTurnSteps: new Set(["Turn your head LEFT", "Turn your head RIGHT"]),
 
-  // ── Capture ───────────────────────────────────────────────────────────────
-  captureDelayMs:      500,
+  // ── Capture ────────────────────────────────────────────────────────────────
+  // Delay after last step — gives user time to relax before snapshot
+  captureDelayMs:      700,
   captureMaxAttempts:   90,
-};
+
+  // "Neutral face" requirements for the final image.
+  // User must look normal: no open mouth, no closed eyes, no turned head.
+  captureMaxYaw:          18,   // roughly facing forward
+  captureMaxPitch:        18,
+  captureMaxMouthScore:   0.20, // jawOpen blendshape — mouth must be closed
+  captureMaxBlinkScore:   0.25, // blink blendshape — eyes must be open
+  captureMinEar:          0.22, // EAR fallback for eyes-open check
+  captureMaxMar:          0.22, // MAR fallback for mouth-closed check
+} as const;
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 export class LivenessEngine {
   private landmarker:  FaceLandmarker | null = null;
@@ -148,10 +172,11 @@ export class LivenessEngine {
   private rafId:       number | null = null;
   private stream:      MediaStream | null = null;
 
-  private stepIndex  = 0;
-  private stepStart  = 0;
+  private stepIndex   = 0;
+  private stepStart   = 0;
 
-  private blinkState:   "open" | "closed" = "open";
+  // ── Per-step sub-state ─────────────────────────────────────────────────────
+  private blinkState:   "waitingClose" | "closed" = "waitingClose";
   private blinkCloseTs  = 0;
   private nodState:     "neutral" | "down" = "neutral";
   private holdStart:    number | null = null;
@@ -162,13 +187,13 @@ export class LivenessEngine {
 
   constructor(private opts: LivenessOptions) {}
 
-  // ── Public API ─────────────────────────────────────────────────────────────
+  // ── Public ─────────────────────────────────────────────────────────────────
 
   async start(): Promise<void> {
     this.stopDetectionOnly();
-    this.running       = true;
-    this.stepIndex     = 0;
-    this.lastDetectTs  = -1;
+    this.running      = true;
+    this.stepIndex    = 0;
+    this.lastDetectTs = -1;
     this.lastOvalState = null;
     const now = performance.now();
     this.stepStart = now + config.readyMs;
@@ -181,10 +206,8 @@ export class LivenessEngine {
 
   stop(): void {
     this.stopDetectionOnly();
-    if (this.stream) {
-      this.stream.getTracks().forEach(t => t.stop());
-      this.stream = null;
-    }
+    this.stream?.getTracks().forEach(t => t.stop());
+    this.stream = null;
   }
 
   private stopDetectionOnly(): void {
@@ -208,15 +231,11 @@ export class LivenessEngine {
     }
     video.playsInline = true;
     await video.play();
-    await this.waitForVideoReady(video);
-  }
-
-  private waitForVideoReady(video: HTMLVideoElement): Promise<void> {
-    return new Promise(resolve => {
-      const check = () => {
-        if (video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0) resolve();
-        else requestAnimationFrame(check);
-      };
+    await new Promise<void>(resolve => {
+      const check = () =>
+        video.readyState >= 2 && video.videoWidth > 0
+          ? resolve()
+          : requestAnimationFrame(check);
       check();
     });
   }
@@ -238,7 +257,7 @@ export class LivenessEngine {
     });
   }
 
-  // ── Detection loop ─────────────────────────────────────────────────────────
+  // ── Loop ───────────────────────────────────────────────────────────────────
 
   private loop(): void {
     if (!this.running || !this.landmarker) return;
@@ -255,16 +274,13 @@ export class LivenessEngine {
       this.latestMetrics = metrics;
 
       const { inside, reason } = this.checkFaceInOval(metrics);
-
-      // Only fire callback on change to avoid flooding the UI
       if (inside !== this.lastOvalState) {
         this.lastOvalState = inside;
         this.opts.callbacks?.onFaceInOval?.(inside, reason);
       }
 
       this.opts.callbacks?.onDebugFrame?.({
-        hasFace: true,
-        metrics,
+        hasFace: true, metrics,
         step: steps[this.stepIndex]?.label ?? "done",
       });
 
@@ -277,7 +293,10 @@ export class LivenessEngine {
         this.lastOvalState = false;
         this.opts.callbacks?.onFaceInOval?.(false, "No face detected");
       }
-      this.opts.callbacks?.onDebugFrame?.({ hasFace: false, metrics: null, step: steps[this.stepIndex]?.label ?? "done" });
+      this.opts.callbacks?.onDebugFrame?.({
+        hasFace: false, metrics: null,
+        step: steps[this.stepIndex]?.label ?? "done",
+      });
     }
 
     this.rafId = requestAnimationFrame(() => this.loop());
@@ -286,33 +305,27 @@ export class LivenessEngine {
   // ── Oval check ─────────────────────────────────────────────────────────────
 
   private checkFaceInOval(m: Metrics): { inside: boolean; reason?: string } {
-    const currentStep = steps[this.stepIndex]?.label ?? "";
-    const isHeadTurn  = config.headTurnSteps.has(currentStep);
+    const isHeadTurn = config.headTurnSteps.has(steps[this.stepIndex]?.label ?? "");
 
-    // Mirror x — video is CSS scaleX(-1), MediaPipe gives raw unmirrored coords
+    // MediaPipe → raw unmirrored coords; mirror x to match CSS display
     const mx = 1 - m.faceCx;
-    const my = m.faceCy;
+    const dy = (m.faceCy - config.ovalCy) / config.ovalRy;
+    const dx = (mx       - config.ovalCx) / config.ovalRx;
 
-    const dx = (mx - config.ovalCx) / config.ovalRx;
-    const dy = (my - config.ovalCy) / config.ovalRy;
-
-    // During head-turn steps, only check the y-axis and size —
-    // the face WILL move horizontally as the head turns.
+    // During head turns only check vertical position — x drifts intentionally
     const inEllipse = isHeadTurn
-      ? Math.abs(dy) <= 1           // only vertical check
-      : dx * dx + dy * dy <= 1;    // full ellipse check
+      ? Math.abs(dy) <= 1
+      : dx * dx + dy * dy <= 1;
 
     if (!inEllipse) {
-      const xDrift = mx - config.ovalCx;
-      const yDrift = my - config.ovalCy;
-      if (Math.abs(yDrift) > Math.abs(xDrift)) {
-        return { inside: false, reason: yDrift < 0 ? "Move down" : "Move up" };
+      if (Math.abs(dy) >= Math.abs(dx)) {
+        return { inside: false, reason: dy < 0 ? "Move down slightly" : "Move up slightly" };
       }
-      return { inside: false, reason: xDrift < 0 ? "Move right" : "Move left" };
+      return { inside: false, reason: dx < 0 ? "Move right" : "Move left" };
     }
 
     if (m.faceSize < config.minFaceSize) return { inside: false, reason: "Move closer to the camera" };
-    if (m.faceSize > config.maxFaceSize) return { inside: false, reason: "Move further from the camera" };
+    if (m.faceSize > config.maxFaceSize) return { inside: false, reason: "Move back a little" };
 
     return { inside: true };
   }
@@ -320,19 +333,23 @@ export class LivenessEngine {
   // ── State machine ──────────────────────────────────────────────────────────
 
   private resetStepState(): void {
-    this.blinkState  = "open";
+    this.blinkState   = "waitingClose";
     this.blinkCloseTs = 0;
-    this.nodState    = "neutral";
-    this.holdStart   = null;
+    this.nodState     = "neutral";
+    this.holdStart    = null;
   }
 
   private updateState(metrics: Metrics, now: number): "passed" | "none" {
-    if (now - this.stepStart < 0) return "none";
+    if (now < this.stepStart) return "none"; // still in ready countdown
 
     switch (steps[this.stepIndex].label) {
 
+      // ── LEFT turn ──────────────────────────────────────────────────────────
       case "Turn your head LEFT": {
-        if (metrics.yaw > config.wrongDirectionDeadband) { this.holdStart = null; return "none"; }
+        if (metrics.yaw > config.wrongDirectionDeadband) {
+          this.holdStart = null;
+          return "none";
+        }
         if (metrics.yaw < config.yawLeftThreshold) {
           if (this.holdStart === null) this.holdStart = now;
           if (now - this.holdStart >= config.holdMs) return this.advanceStep(now);
@@ -342,8 +359,12 @@ export class LivenessEngine {
         break;
       }
 
+      // ── RIGHT turn ─────────────────────────────────────────────────────────
       case "Turn your head RIGHT": {
-        if (metrics.yaw < -config.wrongDirectionDeadband) { this.holdStart = null; return "none"; }
+        if (metrics.yaw < -config.wrongDirectionDeadband) {
+          this.holdStart = null;
+          return "none";
+        }
         if (metrics.yaw > config.yawRightThreshold) {
           if (this.holdStart === null) this.holdStart = now;
           if (now - this.holdStart >= config.holdMs) return this.advanceStep(now);
@@ -353,49 +374,75 @@ export class LivenessEngine {
         break;
       }
 
+      // ── BLINK ──────────────────────────────────────────────────────────────
       case "Blink": {
+        // Allow minor head movement — a real blink often causes a tiny head shift
         if (Math.abs(metrics.yaw) > config.maxYawDuringBlink ||
-            Math.abs(metrics.pitch) > config.maxPitchDuringBlink) return "none";
+            Math.abs(metrics.pitch) > config.maxPitchDuringBlink) {
+          // Don't reset blink state — just pause until they face forward again
+          return "none";
+        }
 
-        const eyesClosed = metrics.blinkScore > 0
+        // Prefer blendshape score; fall back to EAR
+        const isEyeClosed = metrics.blinkScore > 0
           ? metrics.blinkScore > config.blinkClosedThreshold
           : metrics.ear < config.earClosedThreshold;
 
-        const eyesOpen = metrics.blinkScore > 0
+        const isEyeOpen = metrics.blinkScore > 0
           ? metrics.blinkScore < config.blinkOpenThreshold
           : metrics.ear > config.earOpenThreshold;
 
-        if (this.blinkState === "open" && eyesClosed) {
+        if (this.blinkState === "waitingClose" && isEyeClosed) {
+          // Eyes just closed — start timing
           this.blinkState  = "closed";
           this.blinkCloseTs = now;
-        } else if (this.blinkState === "closed" && eyesOpen) {
-          if (now - this.blinkCloseTs <= config.blinkMaxDurationMs) return this.advanceStep(now);
-          this.blinkState = "open"; // too slow — reset sub-state only
+        } else if (this.blinkState === "closed") {
+          if (isEyeOpen) {
+            // Complete blink: closed → open
+            const dur = now - this.blinkCloseTs;
+            if (dur <= config.blinkMaxDurationMs) {
+              return this.advanceStep(now);
+            }
+            // Held too long (e.g. eyes were stuck) — reset and wait for a fresh blink
+            this.blinkState = "waitingClose";
+          }
+          // Still closed — keep waiting for reopening, no timeout pressure
         }
         break;
       }
 
+      // ── NOD ────────────────────────────────────────────────────────────────
       case "Nod your head": {
+        // Allow some yaw during a nod — people naturally do both
         if (Math.abs(metrics.yaw) > config.maxYawDuringNod) return "none";
-        if (this.nodState === "neutral" && metrics.pitch > config.nodDownThreshold) {
-          this.nodState = "down";
-        } else if (this.nodState === "down" && metrics.pitch < config.nodUpThreshold) {
-          return this.advanceStep(now);
+
+        if (this.nodState === "neutral") {
+          // Wait for chin to dip
+          if (metrics.pitch > config.nodDownThreshold) {
+            this.nodState = "down";
+          }
+        } else if (this.nodState === "down") {
+          // Wait for head to come back up — any upward movement counts
+          if (metrics.pitch < config.nodUpThreshold) {
+            return this.advanceStep(now);
+          }
         }
         break;
       }
 
+      // ── OPEN MOUTH ─────────────────────────────────────────────────────────
       case "Open your mouth": {
         if (Math.abs(metrics.yaw)   > config.maxYawDuringMouth ||
             Math.abs(metrics.pitch) > config.maxPitchDuringMouth) return "none";
 
-        const mouthIsOpen = metrics.mouthScore > 0
+        const isMouthOpen = metrics.mouthScore > 0
           ? metrics.mouthScore > config.mouthOpenBlendshapeThreshold
           : metrics.mar > config.mouthOpenMarThreshold;
 
-        if (mouthIsOpen) {
+        if (isMouthOpen) {
           if (this.holdStart === null) this.holdStart = now;
-          if (now - this.holdStart >= config.holdMs) return this.advanceStep(now);
+          // Short hold prevents accidental trigger from talking/yawning
+          if (now - this.holdStart >= config.mouthHoldMs) return this.advanceStep(now);
         } else {
           this.holdStart = null;
         }
@@ -426,6 +473,9 @@ export class LivenessEngine {
   private scheduleCapture(): void {
     let attempts = 0;
 
+    // Tell the UI to prompt the user to relax their face
+    this.opts.callbacks?.onChallengeChanged?.(-1, "Relax and look at the camera");
+
     const tryCapture = () => {
       if (!this.running || !this.landmarker) return;
       attempts++;
@@ -439,26 +489,37 @@ export class LivenessEngine {
         const metrics = extractMetrics(result);
         this.latestMetrics = metrics;
 
-        const eyesOpen = metrics.blinkScore > 0
-          ? metrics.blinkScore < config.blinkOpenThreshold
-          : metrics.ear > config.earOpenThreshold;
+        // ── Neutral face check ─────────────────────────────────────────────
+        // Head must be roughly forward
+        const headFrontal =
+          Math.abs(metrics.yaw)   <= config.captureMaxYaw &&
+          Math.abs(metrics.pitch) <= config.captureMaxPitch;
 
-        if (Math.abs(metrics.yaw)   <= config.frontalYawThreshold &&
-            Math.abs(metrics.pitch) <= config.frontalPitchThreshold &&
-            eyesOpen) {
+        // Eyes must be open (not blinking or squinting)
+        const eyesOpen = metrics.blinkScore > 0
+          ? metrics.blinkScore < config.captureMaxBlinkScore
+          : metrics.ear >= config.captureMinEar;
+
+        // Mouth must be closed — this is the key fix
+        const mouthClosed = metrics.mouthScore > 0
+          ? metrics.mouthScore < config.captureMaxMouthScore
+          : metrics.mar < config.captureMaxMar;
+
+        if (headFrontal && eyesOpen && mouthClosed) {
           this.captureImage();
           return;
         }
       }
 
       if (attempts >= config.captureMaxAttempts) {
-        this.fail("Please look straight at the camera to complete verification.");
+        this.fail("Please look straight at the camera with a relaxed expression.");
         return;
       }
 
       this.rafId = requestAnimationFrame(tryCapture);
     };
 
+    // Longer delay so the user has time to close their mouth after the last step
     setTimeout(() => { this.rafId = requestAnimationFrame(tryCapture); }, config.captureDelayMs);
   }
 
@@ -479,40 +540,49 @@ export class LivenessEngine {
 // ── Metric extraction ────────────────────────────────────────────────────────
 
 function extractMetrics(result: FaceLandmarkerResult): Metrics {
-  const landmarks  = result.faceLandmarks[0];
-  const { yaw, pitch } = extractPose(result, landmarks);
-  const { leftEar, rightEar } = computeEar(landmarks);
-  const mar = computeMar(landmarks);
+  const lks = result.faceLandmarks[0];
+  const { yaw, pitch } = extractPose(result, lks);
+  const { leftEar, rightEar } = computeEar(lks);
+  const mar = computeMar(lks);
 
-  const categories = result.faceBlendshapes?.[0]?.categories ?? [];
-  const getBS = (name: string): number =>
-    categories.find(c => c.categoryName === name)?.score ?? 0;
+  const bs    = result.faceBlendshapes?.[0]?.categories ?? [];
+  const getBS = (name: string) => bs.find(c => c.categoryName === name)?.score ?? 0;
 
   const blinkL = getBS("eyeBlinkLeft"), blinkR = getBS("eyeBlinkRight");
-  const blinkScore = blinkL > 0 || blinkR > 0 ? (blinkL + blinkR) / 2 : 0;
+  const blinkScore = (blinkL > 0 || blinkR > 0) ? (blinkL + blinkR) / 2 : 0;
   const mouthScore = getBS("jawOpen");
 
+  // Face centre: mean of all landmarks
   let sumX = 0, sumY = 0;
-  for (const lm of landmarks) { sumX += lm.x; sumY += lm.y; }
-  const faceCx = sumX / landmarks.length;
-  const faceCy = sumY / landmarks.length;
+  for (const lm of lks) { sumX += lm.x; sumY += lm.y; }
+  const faceCx = sumX / lks.length;
+  const faceCy = sumY / lks.length;
 
-  const le = landmarks[33], re = landmarks[263];
-  const faceSize = Math.hypot(re.x - le.x, re.y - le.y);
+  // Face size: normalised inter-eye distance
+  const faceSize = dist(lks[33], lks[263]);
 
-  return { yaw, pitch, ear: (leftEar + rightEar) / 2, mar, blinkScore, mouthScore, faceCx, faceCy, faceSize };
+  return {
+    yaw, pitch,
+    ear: (leftEar + rightEar) / 2,
+    mar, blinkScore, mouthScore,
+    faceCx, faceCy, faceSize,
+  };
 }
 
-function extractPose(result: FaceLandmarkerResult, landmarks: NormalizedLandmark[]) {
-  const matrices = result.facialTransformationMatrixes;
-  const first    = Array.isArray(matrices) ? matrices[0] : undefined;
-  const data     = Array.isArray(first) ? first
-    : first && "data" in (first as object) ? (first as { data: number[] | Float32Array }).data
+function extractPose(result: FaceLandmarkerResult, lks: NormalizedLandmark[]) {
+  const mats  = result.facialTransformationMatrixes;
+  const first = Array.isArray(mats) ? mats[0] : undefined;
+  const data  = Array.isArray(first) ? first
+    : first && "data" in (first as object)
+    ? (first as { data: number[] | Float32Array }).data
     : undefined;
 
   if (data && data.length >= 16) {
+    // Column-major 4×4: indices [0,1,2] = col-0 = [r00,r10,r20]
+    //                             [6]   = col-1 row-2 = r21
+    //                             [10]  = col-2 row-2 = r22
     const r00 = data[0], r10 = data[1], r20 = data[2];
-    const r21 = data[6], r22 = data[10];
+    const r21 = data[6],  r22 = data[10];
     return {
       yaw:   toDeg(Math.atan2(r10, r00)),
       pitch: toDeg(Math.asin(Math.max(-1, Math.min(1, -r20)))),
@@ -520,7 +590,8 @@ function extractPose(result: FaceLandmarkerResult, landmarks: NormalizedLandmark
     };
   }
 
-  const le = landmarks[33], re = landmarks[263], n = landmarks[1], ch = landmarks[152];
+  // Landmark fallback
+  const le = lks[33], re = lks[263], n = lks[1], ch = lks[152];
   return {
     yaw:   toDeg(Math.atan2(re.z - le.z, re.x - le.x)),
     pitch: toDeg(Math.atan2(ch.y - n.y,  ch.z - n.z)),
@@ -530,14 +601,14 @@ function extractPose(result: FaceLandmarkerResult, landmarks: NormalizedLandmark
 
 function computeEar(lks: NormalizedLandmark[]) {
   return {
-    leftEar:  ear(lks[33],  lks[133], lks[160], lks[158], lks[153], lks[144]),
-    rightEar: ear(lks[362], lks[263], lks[385], lks[387], lks[373], lks[380]),
+    leftEar:  ear(lks[33], lks[133], lks[160], lks[158], lks[153], lks[144]),
+    rightEar: ear(lks[362],lks[263], lks[385], lks[387], lks[373], lks[380]),
   };
 }
 
 function computeMar(lks: NormalizedLandmark[]) {
-  const h = dist(lks[61], lks[291]), v = dist(lks[13], lks[14]);
-  return h === 0 ? 0 : v / h;
+  const h = dist(lks[61], lks[291]);
+  return h === 0 ? 0 : dist(lks[13], lks[14]) / h;
 }
 
 function ear(o: NormalizedLandmark, i: NormalizedLandmark, t1: NormalizedLandmark, t2: NormalizedLandmark, b1: NormalizedLandmark, b2: NormalizedLandmark) {
@@ -549,9 +620,8 @@ function dist(a: NormalizedLandmark, b: NormalizedLandmark) {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
-function toDeg(rad: number) { return (rad * 180) / Math.PI; }
+function toDeg(r: number) { return (r * 180) / Math.PI; }
 
 async function loadTasksVision(): Promise<TasksVisionModule> {
-  const m = await import("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest");
-  return m as unknown as TasksVisionModule;
+  return (await import("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest")) as unknown as TasksVisionModule;
 }

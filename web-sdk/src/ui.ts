@@ -238,6 +238,16 @@ function createStyles(): HTMLStyleElement {
     .lv-eye        { animation: lv-blink 2s ease-in-out infinite; transform-origin: center; }
     .lv-jaw        { animation: lv-mouth 1.5s ease-in-out infinite; transform-origin: top center; }
 
+    /* ── Capture phase ring pulse ────────────────────────────────────────── */
+    @keyframes lv-ring-pulse {
+      0%, 100% { opacity: 1; stroke-width: 3; }
+      50%       { opacity: 0.5; stroke-width: 4.5; }
+    }
+    .lv-ring-pulse {
+      animation: lv-ring-pulse 1s ease-in-out infinite;
+      stroke: var(--lv-green) !important;
+    }
+
     /* ── Hidden canvas for capture ───────────────────────────────────────── */
     .lv-canvas {
       position: absolute;
@@ -370,6 +380,14 @@ export function startLivenessWithUI(options: StartLivenessOptions): LivenessEngi
   let currentStep = 0;
 
   function setProgress(stepIndex: number): void {
+    // stepIndex -1 = capture/relax phase — keep ring full, pulse it
+    if (stepIndex === -1) {
+      ringProgress?.setAttribute("stroke-dashoffset", "0");
+      ringProgress?.classList.add("lv-ring-pulse");
+      hintIcon.innerHTML = ""; // hide gesture icon during capture
+      return;
+    }
+    ringProgress?.classList.remove("lv-ring-pulse");
     const pct = Math.min(stepIndex / LIVENESS_STEP_COUNT, 1);
     ringProgress?.setAttribute("stroke-dashoffset", String(100 - pct * 100));
     dots.forEach((d, i) => {
@@ -380,6 +398,7 @@ export function startLivenessWithUI(options: StartLivenessOptions): LivenessEngi
   }
 
   function setHint(stepIndex: number): void {
+    if (stepIndex === -1) return; // capture phase — icon already cleared by setProgress
     const kind = STEP_HINTS[stepIndex] ?? "left";
     hintIcon.innerHTML = hintSvg(kind);
   }
@@ -408,7 +427,8 @@ export function startLivenessWithUI(options: StartLivenessOptions): LivenessEngi
         setProgress(stepIndex);
         setHint(stepIndex);
         instruction.textContent = stepLabel;
-        options.callbacks.onChallengeChanged?.(stepIndex, stepLabel);
+        // Don't forward the synthetic -1 capture step to the caller
+        if (stepIndex >= 0) options.callbacks.onChallengeChanged?.(stepIndex, stepLabel);
       },
       onFaceInOval: (inside, reason) => {
         setFaceInOval(inside, reason);

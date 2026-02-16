@@ -4,8 +4,8 @@ const root = document.getElementById("root") as HTMLElement;
 
 const callbacks: LivenessCallbacks = {
   onSuccess(imageBase64) {
-    console.log("Liveness passed, image length:", imageBase64.length);
-    alert("Verification complete!");
+    sessionStorage.setItem("livenessImageBase64", imageBase64);
+    window.location.href = "/view-image.html";
   },
   onFailure(reason) {
     console.error("Liveness failed:", reason);
