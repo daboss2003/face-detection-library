@@ -6,6 +6,7 @@ final class ViewController: UIViewController, LivenessDetectorDelegate {
   private let overlayView = FaceOverlayView()
   private let challengeLabel = UILabel()
   private let statusLabel = UILabel()
+  private let posHintLabel = UILabel()
 
   private var detector: LivenessDetector?
 
@@ -17,6 +18,7 @@ final class ViewController: UIViewController, LivenessDetectorDelegate {
     overlayView.translatesAutoresizingMaskIntoConstraints = false
     challengeLabel.translatesAutoresizingMaskIntoConstraints = false
     statusLabel.translatesAutoresizingMaskIntoConstraints = false
+    posHintLabel.translatesAutoresizingMaskIntoConstraints = false
 
     challengeLabel.textColor = .white
     challengeLabel.backgroundColor = UIColor.black.withAlphaComponent(0.4)
@@ -28,10 +30,16 @@ final class ViewController: UIViewController, LivenessDetectorDelegate {
     statusLabel.textAlignment = .center
     statusLabel.font = UIFont.systemFont(ofSize: 16, weight: .regular)
 
+    posHintLabel.textColor = UIColor(red: 1, green: 59/255, blue: 59/255, alpha: 1)
+    posHintLabel.textAlignment = .center
+    posHintLabel.font = UIFont.systemFont(ofSize: 13, weight: .medium)
+    posHintLabel.isHidden = true
+
     view.addSubview(previewView)
     view.addSubview(overlayView)
     view.addSubview(challengeLabel)
     view.addSubview(statusLabel)
+    view.addSubview(posHintLabel)
 
     NSLayoutConstraint.activate([
       previewView.topAnchor.constraint(equalTo: view.topAnchor),
@@ -53,6 +61,10 @@ final class ViewController: UIViewController, LivenessDetectorDelegate {
       statusLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor),
       statusLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor),
       statusLabel.heightAnchor.constraint(equalToConstant: 44),
+
+      posHintLabel.bottomAnchor.constraint(equalTo: statusLabel.topAnchor),
+      posHintLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+      posHintLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor),
     ])
   }
 
@@ -72,7 +84,15 @@ final class ViewController: UIViewController, LivenessDetectorDelegate {
   func onChallengeChanged(stepIndex: Int, stepLabel: String) {
     DispatchQueue.main.async {
       self.challengeLabel.text = stepLabel
-      self.statusLabel.text = "Step \(stepIndex + 1) of 5"
+      if stepIndex >= 0 {
+        self.statusLabel.text = "Step \(stepIndex + 1) of 5"
+        self.overlayView.setProgress(stepIndex)
+        self.overlayView.setStepDots(activeIndex: stepIndex)
+      } else {
+        self.statusLabel.text = "Relax and look at the camera"
+        self.overlayView.setProgress(5)
+        self.overlayView.setStepDots(activeIndex: 5)
+      }
     }
   }
 
@@ -91,6 +111,14 @@ final class ViewController: UIViewController, LivenessDetectorDelegate {
   func onFaceDetected(boundingBox: CGRect?) {
     DispatchQueue.main.async {
       self.overlayView.updateBoundingBox(boundingBox)
+    }
+  }
+
+  func onFaceInOval(inside: Bool, reason: String?) {
+    DispatchQueue.main.async {
+      self.overlayView.setFaceInOval(inside)
+      self.posHintLabel.isHidden = inside
+      self.posHintLabel.text = reason ?? ""
     }
   }
 }

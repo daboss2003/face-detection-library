@@ -18,6 +18,7 @@ class MainActivity : AppCompatActivity(), LivenessListener {
   private lateinit var overlayView: FaceOverlayView
   private lateinit var challengeText: TextView
   private lateinit var statusText: TextView
+  private lateinit var posHintText: TextView
 
   private var detector: LivenessDetector? = null
   private val modelFileName = "face_landmarker.task"
@@ -36,6 +37,7 @@ class MainActivity : AppCompatActivity(), LivenessListener {
     overlayView = findViewById(R.id.overlayView)
     challengeText = findViewById(R.id.challengeText)
     statusText = findViewById(R.id.statusText)
+    posHintText = findViewById(R.id.posHintText)
   }
 
   override fun onResume() {
@@ -95,7 +97,15 @@ class MainActivity : AppCompatActivity(), LivenessListener {
   override fun onChallengeChanged(stepIndex: Int, stepLabel: String) {
     runOnUiThread {
       challengeText.text = stepLabel
-      statusText.text = "Step ${stepIndex + 1} of 5"
+      if (stepIndex >= 0) {
+        statusText.text = "Step ${stepIndex + 1} of 5"
+        overlayView.setProgress(stepIndex)
+        overlayView.setStepDots(stepIndex)
+      } else {
+        statusText.text = "Relax and look at the camera"
+        overlayView.setProgress(5)
+        overlayView.setStepDots(5)
+      }
     }
   }
 
@@ -114,6 +124,14 @@ class MainActivity : AppCompatActivity(), LivenessListener {
   override fun onFaceDetected(boundingBox: android.graphics.RectF?) {
     runOnUiThread {
       overlayView.updateBoundingBox(boundingBox)
+    }
+  }
+
+  override fun onFaceInOval(inside: Boolean, reason: String?) {
+    runOnUiThread {
+      overlayView.setFaceInOval(inside)
+      posHintText.visibility = if (inside) android.view.View.GONE else android.view.View.VISIBLE
+      posHintText.text = reason ?: ""
     }
   }
 

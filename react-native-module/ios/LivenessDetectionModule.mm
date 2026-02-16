@@ -14,7 +14,7 @@
 RCT_EXPORT_MODULE(LivenessDetection)
 
 - (NSArray<NSString *> *)supportedEvents {
-  return @[@"challengeChanged", @"failure"];
+  return @[@"challengeChanged", @"failure", @"faceInOval"];
 }
 
 - (void)startLiveness:(NSDictionary *)options resolve:(RCTPromiseResolveBlock)resolve reject:(RCTPromiseRejectBlock)reject {
@@ -85,6 +85,12 @@ RCT_EXPORT_MODULE(LivenessDetection)
 
 - (void)onFaceDetectedWithBoundingBox:(CGRect)boundingBox {
   // Optional; no-op for RN.
+}
+
+- (void)onFaceInOvalWithInside:(BOOL)inside reason:(NSString *)reason {
+  NSMutableDictionary *body = [NSMutableDictionary dictionaryWithObject:@(inside) forKey:@"inside"];
+  if (reason.length > 0) body[@"reason"] = reason;
+  [self sendEventWithName:@"faceInOval" body:body];
 }
 
 @end

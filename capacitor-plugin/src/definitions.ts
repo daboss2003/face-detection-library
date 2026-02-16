@@ -7,6 +7,11 @@ export type LivenessFailureEvent = {
   reason: string;
 };
 
+export type LivenessFaceInOvalEvent = {
+  inside: boolean;
+  reason?: string;
+};
+
 export type LivenessResult = {
   imageBase64: string;
 };
@@ -25,5 +30,9 @@ export interface LivenessPlugin {
   addListener(
     eventName: "failure",
     listenerFunc: (event: LivenessFailureEvent) => void
+  ): Promise<void>;
+  addListener(
+    eventName: "faceInOval",
+    listenerFunc: (event: LivenessFaceInOvalEvent) => void
   ): Promise<void>;
 }

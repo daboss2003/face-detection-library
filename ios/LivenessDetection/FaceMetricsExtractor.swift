@@ -15,6 +15,25 @@ enum FaceMetricsExtractor {
 
     let boundingBox = computeBoundingBox(landmarks, imageSize: imageSize)
 
+    let categories = result.faceBlendshapes.first?.categories ?? []
+    func blendScore(_ name: String) -> Float {
+      return categories.first(where: { $0.categoryName == name })?.score ?? 0
+    }
+    let blinkL = blendScore("eyeBlinkLeft")
+    let blinkR = blendScore("eyeBlinkRight")
+    let blinkScore = (blinkL > 0 || blinkR > 0) ? (blinkL + blinkR) / 2 : 0
+    let mouthScore = blendScore("jawOpen")
+
+    var sumX: Float = 0
+    var sumY: Float = 0
+    for lm in landmarks {
+      sumX += lm.x
+      sumY += lm.y
+    }
+    let faceCx = sumX / Float(landmarks.count)
+    let faceCy = sumY / Float(landmarks.count)
+    let faceSize = distance(landmarks[33], landmarks[263])
+
     return FaceMetrics(
       yaw: pose.yaw,
       pitch: pose.pitch,
@@ -22,6 +41,11 @@ enum FaceMetricsExtractor {
       leftEar: leftEar,
       rightEar: rightEar,
       mouthMar: mar,
+      blinkScore: blinkScore,
+      mouthScore: mouthScore,
+      faceCx: faceCx,
+      faceCy: faceCy,
+      faceSize: faceSize,
       boundingBox: boundingBox,
       timestampMs: Int64(result.timestampInMilliseconds)
     )
@@ -44,5 +68,11 @@ enum FaceMetricsExtractor {
       width: CGFloat(maxX - minX) * imageSize.width,
       height: CGFloat(maxY - minY) * imageSize.height
     )
+  }
+
+  private static func distance(_ a: NormalizedLandmark, _ b: NormalizedLandmark) -> Float {
+    let dx = a.x - b.x
+    let dy = a.y - b.y
+    return sqrt(dx * dx + dy * dy)
   }
 }

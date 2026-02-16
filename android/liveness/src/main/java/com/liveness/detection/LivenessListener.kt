@@ -7,4 +7,5 @@ interface LivenessListener {
   fun onLivenessPassed(imageBytes: ByteArray)
   fun onFailure(reason: String)
   fun onFaceDetected(boundingBox: RectF?) {}
+  fun onFaceInOval(inside: Boolean, reason: String?) {}
 }

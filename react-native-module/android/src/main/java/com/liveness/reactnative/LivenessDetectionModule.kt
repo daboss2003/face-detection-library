@@ -123,6 +123,12 @@ class LivenessDetectionModule(
     emitEvent("challengeChanged", mapOf("stepIndex" to stepIndex, "stepLabel" to stepLabel))
   }
 
+  override fun onFaceInOval(inside: Boolean, reason: String?) {
+    val data = mutableMapOf<String, Any>("inside" to inside)
+    reason?.let { data["reason"] = it }
+    emitEvent("faceInOval", data)
+  }
+
   override fun onLivenessPassed(imageBytes: ByteArray) {
     val promise = pendingPromise
     if (promise != null) {

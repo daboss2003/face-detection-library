@@ -2,110 +2,137 @@ package com.liveness.detection
 
 class LivenessStateMachine(
   private val config: LivenessConfig,
+  private val steps: List<LivenessStep>,
 ) {
   private var stepIndex = 0
   private var stepStartMs: Long = 0L
-  private var blinkState = BlinkState.WAITING_FOR_OPEN
-  private var nodState = NodState.WAITING_FOR_DOWN
+  private var blinkState = BlinkState.WAITING_FOR_CLOSE
+  private var blinkCloseMs: Long = 0L
+  private var nodState = NodState.NEUTRAL
+  private var holdStartMs: Long? = null
+
+  private var baselineYaw: Float? = null
+  private var baselinePitch: Float? = null
+  private val baselineSamples = ArrayList<Pair<Float, Float>>()
+  private var nodPeakDPitch: Float = 0f
 
   fun reset(nowMs: Long) {
     stepIndex = 0
-    stepStartMs = nowMs
-    blinkState = BlinkState.WAITING_FOR_OPEN
-    nodState = NodState.WAITING_FOR_DOWN
+    stepStartMs = nowMs + config.readyMs
+    resetStepState()
   }
 
-  fun currentStep(): LivenessStep {
-    return LivenessStep.ordered[stepIndex]
-  }
+  fun currentStep(): LivenessStep = steps[stepIndex]
 
-  fun update(metrics: FaceMetrics, nowMs: Long): LivenessUpdate {
-    val elapsed = nowMs - stepStartMs
-    val step = currentStep()
-
-    val timeout = when (step) {
-      LivenessStep.BLINK -> config.blinkTimeoutMs
-      LivenessStep.MOUTH -> config.mouthTimeoutMs
-      LivenessStep.NOD -> config.nodTimeoutMs
-      else -> config.stepTimeoutMs
+  fun update(metrics: FaceMetrics, nowMs: Long, insideOval: Boolean): LivenessUpdate {
+    if (insideOval && baselineYaw == null) {
+      baselineSamples.add(metrics.yaw to metrics.pitch)
+      if (baselineSamples.size >= config.baselineFrames) {
+        val yaws = baselineSamples.map { it.first }.sorted()
+        val pitches = baselineSamples.map { it.second }.sorted()
+        val mid = yaws.size / 2
+        baselineYaw = yaws[mid]
+        baselinePitch = pitches[mid]
+      }
     }
 
-    if (elapsed > timeout) {
-      return LivenessUpdate.Failed("Step timeout")
-    }
+    if (nowMs < stepStartMs) return LivenessUpdate.None
+    val bYaw = baselineYaw ?: return LivenessUpdate.None
+    val bPitch = baselinePitch ?: return LivenessUpdate.None
 
-    return when (step) {
-      LivenessStep.TURN_LEFT -> handleTurnLeft(metrics, nowMs)
-      LivenessStep.BLINK -> handleBlink(metrics, elapsed, nowMs)
-      LivenessStep.TURN_RIGHT -> handleTurnRight(metrics, nowMs)
-      LivenessStep.NOD -> handleNod(metrics, nowMs)
+    val dYaw = metrics.yaw - bYaw
+    val dPitch = metrics.pitch - bPitch
+
+    return when (currentStep()) {
+      LivenessStep.TURN_LEFT -> handleTurnLeft(dYaw, nowMs)
+      LivenessStep.BLINK -> handleBlink(metrics, nowMs)
+      LivenessStep.TURN_RIGHT -> handleTurnRight(dYaw, nowMs)
+      LivenessStep.NOD -> handleNod(dYaw, dPitch, nowMs)
       LivenessStep.MOUTH -> handleMouth(metrics, nowMs)
     }
   }
 
-  private fun handleTurnLeft(metrics: FaceMetrics, nowMs: Long): LivenessUpdate {
-    if (metrics.yaw > config.yawRightThreshold) {
-      return LivenessUpdate.Failed("Wrong direction: turned right")
+  private fun handleTurnLeft(dYaw: Float, nowMs: Long): LivenessUpdate {
+    if (dYaw > config.yawWrongDirDelta) {
+      holdStartMs = null
+      return LivenessUpdate.None
     }
-    if (metrics.yaw < config.yawLeftThreshold) {
-      return advanceStep(nowMs)
-    }
-    return LivenessUpdate.None
-  }
-
-  private fun handleTurnRight(metrics: FaceMetrics, nowMs: Long): LivenessUpdate {
-    if (metrics.yaw < config.yawLeftThreshold) {
-      return LivenessUpdate.Failed("Wrong direction: turned left")
-    }
-    if (metrics.yaw > config.yawRightThreshold) {
-      return advanceStep(nowMs)
+    if (dYaw < -config.yawTurnDelta) {
+      if (holdStartMs == null) holdStartMs = nowMs
+      if (nowMs - (holdStartMs ?: nowMs) >= config.headTurnHoldMs) return advanceStep(nowMs)
+    } else {
+      holdStartMs = null
     }
     return LivenessUpdate.None
   }
 
-  private fun handleBlink(metrics: FaceMetrics, elapsedMs: Long, nowMs: Long): LivenessUpdate {
+  private fun handleTurnRight(dYaw: Float, nowMs: Long): LivenessUpdate {
+    if (dYaw < -config.yawWrongDirDelta) {
+      holdStartMs = null
+      return LivenessUpdate.None
+    }
+    if (dYaw > config.yawTurnDelta) {
+      if (holdStartMs == null) holdStartMs = nowMs
+      if (nowMs - (holdStartMs ?: nowMs) >= config.headTurnHoldMs) return advanceStep(nowMs)
+    } else {
+      holdStartMs = null
+    }
+    return LivenessUpdate.None
+  }
+
+  private fun handleBlink(metrics: FaceMetrics, nowMs: Long): LivenessUpdate {
     if (kotlin.math.abs(metrics.yaw) > config.maxYawDuringBlink ||
       kotlin.math.abs(metrics.pitch) > config.maxPitchDuringBlink) {
-      return LivenessUpdate.Failed("Incorrect motion during blink")
+      return LivenessUpdate.None
+    }
+
+    val useBlend = metrics.blinkScore > 0f
+    val isEyeClosed = if (useBlend) {
+      metrics.blinkScore > config.blinkClosedThreshold
+    } else {
+      metrics.avgEar < config.earClosedThreshold
+    }
+    val isEyeOpen = if (useBlend) {
+      metrics.blinkScore < config.blinkOpenThreshold
+    } else {
+      metrics.avgEar > config.earOpenThreshold
     }
 
     when (blinkState) {
-      BlinkState.WAITING_FOR_OPEN -> {
-        if (metrics.avgEar > config.blinkOpenThreshold) {
-          blinkState = BlinkState.WAITING_FOR_CLOSED
+      BlinkState.WAITING_FOR_CLOSE -> {
+        if (isEyeClosed) {
+          blinkState = BlinkState.CLOSED
+          blinkCloseMs = nowMs
         }
       }
-      BlinkState.WAITING_FOR_CLOSED -> {
-        if (metrics.avgEar < config.blinkClosedThreshold) {
-          blinkState = BlinkState.WAITING_FOR_OPEN_AGAIN
-        }
-      }
-      BlinkState.WAITING_FOR_OPEN_AGAIN -> {
-        if (metrics.avgEar > config.blinkOpenThreshold) {
-          if (elapsedMs <= config.blinkMaxDurationMs) {
+      BlinkState.CLOSED -> {
+        if (isEyeOpen) {
+          if (nowMs - blinkCloseMs <= config.blinkMaxDurationMs) {
             return advanceStep(nowMs)
           }
-          return LivenessUpdate.Failed("Blink too slow")
+          blinkState = BlinkState.WAITING_FOR_CLOSE
         }
       }
     }
     return LivenessUpdate.None
   }
 
-  private fun handleNod(metrics: FaceMetrics, nowMs: Long): LivenessUpdate {
-    if (kotlin.math.abs(metrics.yaw) > config.maxYawDuringNod) {
-      return LivenessUpdate.Failed("Incorrect motion during nod")
-    }
+  private fun handleNod(dYaw: Float, dPitch: Float, nowMs: Long): LivenessUpdate {
+    if (kotlin.math.abs(dYaw) > config.maxYawDuringNod) return LivenessUpdate.None
     when (nodState) {
-      NodState.WAITING_FOR_DOWN -> {
-        if (metrics.pitch > config.nodDownThreshold) {
-          nodState = NodState.WAITING_FOR_UP
+      NodState.NEUTRAL -> {
+        if (dPitch > config.nodDownDelta) {
+          nodState = NodState.DOWN
+          nodPeakDPitch = dPitch
         }
       }
-      NodState.WAITING_FOR_UP -> {
-        if (metrics.pitch < config.nodUpThreshold) {
-          return advanceStep(nowMs)
-        }
+      NodState.DOWN -> {
+        if (dPitch > nodPeakDPitch) nodPeakDPitch = dPitch
+        val returnTarget = minOf(
+          nodPeakDPitch * config.nodReturnFraction,
+          config.nodReturnMaxDelta
+        )
+        if (dPitch < returnTarget) return advanceStep(nowMs)
       }
     }
     return LivenessUpdate.None
@@ -114,40 +141,56 @@ class LivenessStateMachine(
   private fun handleMouth(metrics: FaceMetrics, nowMs: Long): LivenessUpdate {
     if (kotlin.math.abs(metrics.yaw) > config.maxYawDuringMouth ||
       kotlin.math.abs(metrics.pitch) > config.maxPitchDuringMouth) {
-      return LivenessUpdate.Failed("Incorrect motion during mouth step")
+      return LivenessUpdate.None
     }
-    if (metrics.mouthMar > config.mouthOpenThreshold) {
-      return advanceStep(nowMs)
+    val mouthOpen = if (metrics.mouthScore > 0f) {
+      metrics.mouthScore > config.mouthOpenThreshold
+    } else {
+      metrics.mouthMar > config.mouthOpenMarThreshold
+    }
+    if (mouthOpen) {
+      if (holdStartMs == null) holdStartMs = nowMs
+      if (nowMs - (holdStartMs ?: nowMs) >= config.mouthHoldMs) return advanceStep(nowMs)
+    } else {
+      holdStartMs = null
     }
     return LivenessUpdate.None
   }
 
   private fun advanceStep(nowMs: Long): LivenessUpdate {
     stepIndex++
-    if (stepIndex >= LivenessStep.ordered.size) {
+    if (stepIndex >= steps.size) {
       return LivenessUpdate.Passed
     }
-    stepStartMs = nowMs
-    blinkState = BlinkState.WAITING_FOR_OPEN
-    nodState = NodState.WAITING_FOR_DOWN
-    val step = currentStep()
-    return LivenessUpdate.StepChanged(step)
+    stepStartMs = nowMs + config.readyMs
+    resetStepState()
+    return LivenessUpdate.StepChanged(stepIndex, currentStep().label)
+  }
+
+  private fun resetStepState() {
+    blinkState = BlinkState.WAITING_FOR_CLOSE
+    blinkCloseMs = 0L
+    nodState = NodState.NEUTRAL
+    holdStartMs = null
+    baselineYaw = null
+    baselinePitch = null
+    baselineSamples.clear()
+    nodPeakDPitch = 0f
   }
 
   private enum class BlinkState {
-    WAITING_FOR_OPEN,
-    WAITING_FOR_CLOSED,
-    WAITING_FOR_OPEN_AGAIN,
+    WAITING_FOR_CLOSE,
+    CLOSED,
   }
 
   private enum class NodState {
-    WAITING_FOR_DOWN,
-    WAITING_FOR_UP,
+    NEUTRAL,
+    DOWN,
   }
 }
 
 sealed class LivenessUpdate {
-  data class StepChanged(val step: LivenessStep) : LivenessUpdate()
+  data class StepChanged(val stepIndex: Int, val stepLabel: String) : LivenessUpdate()
   data class Failed(val reason: String) : LivenessUpdate()
   data object Passed : LivenessUpdate()
   data object None : LivenessUpdate()

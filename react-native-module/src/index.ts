@@ -1,6 +1,6 @@
 import { NativeEventEmitter } from "react-native";
 import NativeLivenessDetection from "./NativeLivenessDetection";
-import type { LivenessChallengeEvent, LivenessFailureEvent, LivenessResult, LivenessStartOptions } from "./NativeLivenessDetection";
+import type { LivenessChallengeEvent, LivenessFailureEvent, LivenessFaceInOvalEvent, LivenessResult, LivenessStartOptions } from "./NativeLivenessDetection";
 export { LivenessWebView } from "./LivenessWebView";
 
 const emitter = new NativeEventEmitter(NativeLivenessDetection);
@@ -25,4 +25,10 @@ export function addFailureListener(
   return emitter.addListener("failure", listener);
 }
 
-export type { LivenessChallengeEvent, LivenessFailureEvent, LivenessResult };
+export function addFaceInOvalListener(
+  listener: (event: LivenessFaceInOvalEvent) => void
+) {
+  return emitter.addListener("faceInOval", listener);
+}
+
+export type { LivenessChallengeEvent, LivenessFailureEvent, LivenessFaceInOvalEvent, LivenessResult };

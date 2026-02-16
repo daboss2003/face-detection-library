@@ -4,19 +4,65 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.RectF
 import android.util.AttributeSet
 import android.view.View
+import kotlin.math.min
 
 class FaceOverlayView @JvmOverloads constructor(
   context: Context,
   attrs: AttributeSet? = null,
 ) : View(context, attrs) {
-  private val paint = Paint().apply {
-    color = Color.GREEN
-    style = Paint.Style.STROKE
-    strokeWidth = 4f
+
+  companion object {
+    private const val OVAL_TOP_PCT = 0.40f
+    private const val STEP_COUNT = 5
   }
+
+  private val ovalRect = RectF()
+  private val darkPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    color = Color.parseColor("#D1000000")
+    style = Paint.Style.FILL
+  }
+  private val darkPaintOutOfOval = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    color = Color.parseColor("#8C000000")
+    style = Paint.Style.FILL
+  }
+  private val trackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    color = Color.argb(38, 255, 255, 255)
+    style = Paint.Style.STROKE
+    strokeWidth = 3.5f
+  }
+  private val progressPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    color = Color.parseColor("#12c95c")
+    style = Paint.Style.STROKE
+    strokeWidth = 3.5f
+    strokeCap = Paint.Cap.ROUND
+  }
+  private val progressPaintOutOfOval = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    color = Color.parseColor("#ff3b3b")
+    style = Paint.Style.STROKE
+    strokeWidth = 3.5f
+    strokeCap = Paint.Cap.ROUND
+  }
+  private val dotPaintInactive = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    color = Color.argb(51, 255, 255, 255)
+    style = Paint.Style.FILL
+  }
+  private val dotPaintActive = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    color = Color.parseColor("#12c95c")
+    style = Paint.Style.FILL
+  }
+  private val dotPaintDone = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    color = Color.parseColor("#12c95c")
+    style = Paint.Style.FILL
+    alpha = 128
+  }
+
+  private var faceInOval = true
+  private var completedSteps = 0
+  private var activeStepIndex = 0
   private var boundingBox: RectF? = null
 
   fun updateBoundingBox(rect: RectF?) {
@@ -24,10 +70,63 @@ class FaceOverlayView @JvmOverloads constructor(
     invalidate()
   }
 
+  fun setFaceInOval(inside: Boolean) {
+    if (faceInOval != inside) {
+      faceInOval = inside
+      invalidate()
+    }
+  }
+
+  fun setProgress(completed: Int) {
+    if (completedSteps != completed) {
+      completedSteps = completed.coerceIn(0, STEP_COUNT)
+      invalidate()
+    }
+  }
+
+  fun setStepDots(activeIndex: Int) {
+    if (activeStepIndex != activeIndex) {
+      activeStepIndex = activeIndex.coerceIn(0, STEP_COUNT - 1)
+      invalidate()
+    }
+  }
+
   override fun onDraw(canvas: Canvas) {
     super.onDraw(canvas)
-    boundingBox?.let { rect ->
-      canvas.drawRect(rect, paint)
+    val w = width.toFloat()
+    val h = height.toFloat()
+    val ovalW = min(w * 0.72f, 270f)
+    val ovalH = min(h * 0.45f, 360f)
+    val cx = w / 2f
+    val cy = h * OVAL_TOP_PCT
+    ovalRect.set(cx - ovalW / 2, cy - ovalH / 2, cx + ovalW / 2, cy + ovalH / 2)
+
+    val overlayPaint = if (faceInOval) darkPaint else darkPaintOutOfOval
+    val path = Path().apply { addRect(0f, 0f, w, h, Path.Direction.CW) }
+    val ovalPath = Path().apply { addOval(ovalRect, Path.Direction.CW) }
+    path.op(ovalPath, Path.Op.DIFFERENCE)
+    canvas.drawPath(path, overlayPaint)
+
+    val rx = ovalRect.width() / 2f - 2f
+    val ry = ovalRect.height() / 2f - 2f
+    canvas.drawOval(ovalRect, trackPaint)
+    val progressPaintToUse = if (faceInOval) progressPaint else progressPaintOutOfOval
+    val sweep = 360f * (completedSteps.toFloat() / STEP_COUNT)
+    canvas.drawArc(ovalRect, -90f, sweep, false, progressPaintToUse)
+
+    val dotRadius = 3.5f
+    val dotGap = 8f
+    val totalDotsWidth = STEP_COUNT * (dotRadius * 2) + (STEP_COUNT - 1) * dotGap
+    var dotLeft = cx - totalDotsWidth / 2f + dotRadius
+    val dotY = cy + ovalH / 2f + 20f
+    for (i in 0 until STEP_COUNT) {
+      val paint = when {
+        i < activeStepIndex -> dotPaintDone
+        i == activeStepIndex -> dotPaintActive
+        else -> dotPaintInactive
+      }
+      canvas.drawCircle(dotLeft, dotY, dotRadius, paint)
+      dotLeft += dotRadius * 2 + dotGap
     }
   }
 }

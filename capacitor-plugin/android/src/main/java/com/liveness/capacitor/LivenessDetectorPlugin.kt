@@ -126,6 +126,13 @@ class LivenessDetectorPlugin : Plugin(), LivenessListener {
     notifyListeners("challengeChanged", data)
   }
 
+  override fun onFaceInOval(inside: Boolean, reason: String?) {
+    val data = JSObject()
+    data.put("inside", inside)
+    reason?.let { data.put("reason", it) }
+    notifyListeners("faceInOval", data)
+  }
+
   override fun onLivenessPassed(imageBytes: ByteArray) {
     val call = pendingCall ?: return
     val data = JSObject()

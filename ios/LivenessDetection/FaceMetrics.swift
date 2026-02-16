@@ -8,6 +8,11 @@ struct FaceMetrics {
   let leftEar: Float
   let rightEar: Float
   let mouthMar: Float
+  let blinkScore: Float
+  let mouthScore: Float
+  let faceCx: Float
+  let faceCy: Float
+  let faceSize: Float
   let boundingBox: CGRect?
   let timestampMs: Int64
 

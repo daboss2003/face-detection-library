@@ -2,125 +2,150 @@ import Foundation
 
 enum LivenessUpdate {
   case none
-  case stepChanged(LivenessStep)
+  case stepChanged(stepIndex: Int, stepLabel: String)
   case failed(String)
   case passed
 }
 
 final class LivenessStateMachine {
   private let config: LivenessConfig
+  private let steps: [LivenessStep]
   private var stepIndex: Int = 0
   private var stepStartMs: Int64 = 0
-  private var blinkState: BlinkState = .waitingForOpen
-  private var nodState: NodState = .waitingForDown
+  private var blinkState: BlinkState = .waitingForClose
+  private var blinkCloseMs: Int64 = 0
+  private var nodState: NodState = .neutral
+  private var holdStartMs: Int64?
 
-  init(config: LivenessConfig) {
+  private var baselineYaw: Float?
+  private var baselinePitch: Float?
+  private var baselineSamples: [(Float, Float)] = []
+  private var nodPeakDPitch: Float = 0
+
+  init(config: LivenessConfig, steps: [LivenessStep]) {
     self.config = config
+    self.steps = steps
   }
 
   func reset(nowMs: Int64) {
     stepIndex = 0
-    stepStartMs = nowMs
-    blinkState = .waitingForOpen
-    nodState = .waitingForDown
+    stepStartMs = nowMs + config.readyMs
+    resetStepState()
   }
 
   func currentStep() -> LivenessStep {
-    return LivenessStep.allCases[stepIndex]
+    return steps[stepIndex]
   }
 
-  func update(metrics: FaceMetrics, nowMs: Int64) -> LivenessUpdate {
-    let elapsed = nowMs - stepStartMs
-    let step = currentStep()
-    let timeout: Int64
-    switch step {
-    case .blink:
-      timeout = config.blinkTimeoutMs
-    case .mouth:
-      timeout = config.mouthTimeoutMs
-    case .nod:
-      timeout = config.nodTimeoutMs
-    default:
-      timeout = config.stepTimeoutMs
+  func update(metrics: FaceMetrics, nowMs: Int64, insideOval: Bool) -> LivenessUpdate {
+    if insideOval && baselineYaw == nil {
+      baselineSamples.append((metrics.yaw, metrics.pitch))
+      if baselineSamples.count >= config.baselineFrames {
+        let yaws = baselineSamples.map { $0.0 }.sorted()
+        let pitches = baselineSamples.map { $0.1 }.sorted()
+        let mid = yaws.count / 2
+        baselineYaw = yaws[mid]
+        baselinePitch = pitches[mid]
+      }
     }
 
-    if elapsed > timeout {
-      return .failed("Step timeout")
-    }
+    if nowMs < stepStartMs { return .none }
+    guard let bYaw = baselineYaw, let bPitch = baselinePitch else { return .none }
+    let dYaw = metrics.yaw - bYaw
+    let dPitch = metrics.pitch - bPitch
 
-    switch step {
+    switch currentStep() {
     case .turnLeft:
-      return handleTurnLeft(metrics: metrics, nowMs: nowMs)
+      return handleTurnLeft(dYaw: dYaw, nowMs: nowMs)
     case .blink:
-      return handleBlink(metrics: metrics, elapsedMs: elapsed, nowMs: nowMs)
+      return handleBlink(metrics: metrics, nowMs: nowMs)
     case .turnRight:
-      return handleTurnRight(metrics: metrics, nowMs: nowMs)
+      return handleTurnRight(dYaw: dYaw, nowMs: nowMs)
     case .nod:
-      return handleNod(metrics: metrics, nowMs: nowMs)
+      return handleNod(dYaw: dYaw, dPitch: dPitch, nowMs: nowMs)
     case .mouth:
       return handleMouth(metrics: metrics, nowMs: nowMs)
     }
   }
 
-  private func handleTurnLeft(metrics: FaceMetrics, nowMs: Int64) -> LivenessUpdate {
-    if metrics.yaw > config.yawRightThreshold {
-      return .failed("Wrong direction: turned right")
+  private func handleTurnLeft(dYaw: Float, nowMs: Int64) -> LivenessUpdate {
+    if dYaw > config.yawWrongDirDelta {
+      holdStartMs = nil
+      return .none
     }
-    if metrics.yaw < config.yawLeftThreshold {
-      return advanceStep(nowMs: nowMs)
-    }
-    return .none
-  }
-
-  private func handleTurnRight(metrics: FaceMetrics, nowMs: Int64) -> LivenessUpdate {
-    if metrics.yaw < config.yawLeftThreshold {
-      return .failed("Wrong direction: turned left")
-    }
-    if metrics.yaw > config.yawRightThreshold {
-      return advanceStep(nowMs: nowMs)
-    }
-    return .none
-  }
-
-  private func handleBlink(metrics: FaceMetrics, elapsedMs: Int64, nowMs: Int64) -> LivenessUpdate {
-    if abs(metrics.yaw) > config.maxYawDuringBlink ||
-      abs(metrics.pitch) > config.maxPitchDuringBlink {
-      return .failed("Incorrect motion during blink")
-    }
-
-    switch blinkState {
-    case .waitingForOpen:
-      if metrics.avgEar > config.blinkOpenThreshold {
-        blinkState = .waitingForClosed
-      }
-    case .waitingForClosed:
-      if metrics.avgEar < config.blinkClosedThreshold {
-        blinkState = .waitingForOpenAgain
-      }
-    case .waitingForOpenAgain:
-      if metrics.avgEar > config.blinkOpenThreshold {
-        if elapsedMs <= config.blinkMaxDurationMs {
-          return advanceStep(nowMs: nowMs)
-        }
-        return .failed("Blink too slow")
-      }
-    }
-    return .none
-  }
-
-  private func handleNod(metrics: FaceMetrics, nowMs: Int64) -> LivenessUpdate {
-    if abs(metrics.yaw) > config.maxYawDuringNod {
-      return .failed("Incorrect motion during nod")
-    }
-    switch nodState {
-    case .waitingForDown:
-      if metrics.pitch > config.nodDownThreshold {
-        nodState = .waitingForUp
-      }
-    case .waitingForUp:
-      if metrics.pitch < config.nodUpThreshold {
+    if dYaw < -config.yawTurnDelta {
+      if holdStartMs == nil { holdStartMs = nowMs }
+      if nowMs - (holdStartMs ?? nowMs) >= config.headTurnHoldMs {
         return advanceStep(nowMs: nowMs)
       }
+    } else {
+      holdStartMs = nil
+    }
+    return .none
+  }
+
+  private func handleTurnRight(dYaw: Float, nowMs: Int64) -> LivenessUpdate {
+    if dYaw < -config.yawWrongDirDelta {
+      holdStartMs = nil
+      return .none
+    }
+    if dYaw > config.yawTurnDelta {
+      if holdStartMs == nil { holdStartMs = nowMs }
+      if nowMs - (holdStartMs ?? nowMs) >= config.headTurnHoldMs {
+        return advanceStep(nowMs: nowMs)
+      }
+    } else {
+      holdStartMs = nil
+    }
+    return .none
+  }
+
+  private func handleBlink(metrics: FaceMetrics, nowMs: Int64) -> LivenessUpdate {
+    if abs(metrics.yaw) > config.maxYawDuringBlink ||
+      abs(metrics.pitch) > config.maxPitchDuringBlink {
+      return .none
+    }
+
+    let useBlend = metrics.blinkScore > 0
+    let isEyeClosed = useBlend
+      ? metrics.blinkScore > config.blinkClosedThreshold
+      : metrics.avgEar < config.earClosedThreshold
+    let isEyeOpen = useBlend
+      ? metrics.blinkScore < config.blinkOpenThreshold
+      : metrics.avgEar > config.earOpenThreshold
+
+    switch blinkState {
+    case .waitingForClose:
+      if isEyeClosed {
+        blinkState = .closed
+        blinkCloseMs = nowMs
+      }
+    case .closed:
+      if isEyeOpen {
+        if nowMs - blinkCloseMs <= config.blinkMaxDurationMs {
+          return advanceStep(nowMs: nowMs)
+        }
+        blinkState = .waitingForClose
+      }
+    }
+    return .none
+  }
+
+  private func handleNod(dYaw: Float, dPitch: Float, nowMs: Int64) -> LivenessUpdate {
+    if abs(dYaw) > config.maxYawDuringNod { return .none }
+    switch nodState {
+    case .neutral:
+      if dPitch > config.nodDownDelta {
+        nodState = .down
+        nodPeakDPitch = dPitch
+      }
+    case .down:
+      if dPitch > nodPeakDPitch { nodPeakDPitch = dPitch }
+      let returnTarget = min(
+        nodPeakDPitch * config.nodReturnFraction,
+        config.nodReturnMaxDelta
+      )
+      if dPitch < returnTarget { return advanceStep(nowMs: nowMs) }
     }
     return .none
   }
@@ -128,33 +153,50 @@ final class LivenessStateMachine {
   private func handleMouth(metrics: FaceMetrics, nowMs: Int64) -> LivenessUpdate {
     if abs(metrics.yaw) > config.maxYawDuringMouth ||
       abs(metrics.pitch) > config.maxPitchDuringMouth {
-      return .failed("Incorrect motion during mouth step")
+      return .none
     }
-    if metrics.mouthMar > config.mouthOpenThreshold {
-      return advanceStep(nowMs: nowMs)
+    let mouthOpen = metrics.mouthScore > 0
+      ? metrics.mouthScore > config.mouthOpenThreshold
+      : metrics.mouthMar > config.mouthOpenMarThreshold
+    if mouthOpen {
+      if holdStartMs == nil { holdStartMs = nowMs }
+      if nowMs - (holdStartMs ?? nowMs) >= config.mouthHoldMs {
+        return advanceStep(nowMs: nowMs)
+      }
+    } else {
+      holdStartMs = nil
     }
     return .none
   }
 
   private func advanceStep(nowMs: Int64) -> LivenessUpdate {
     stepIndex += 1
-    if stepIndex >= LivenessStep.allCases.count {
+    if stepIndex >= steps.count {
       return .passed
     }
-    stepStartMs = nowMs
-    blinkState = .waitingForOpen
-    nodState = .waitingForDown
-    return .stepChanged(currentStep())
+    stepStartMs = nowMs + config.readyMs
+    resetStepState()
+    return .stepChanged(stepIndex: stepIndex, stepLabel: currentStep().label)
+  }
+
+  private func resetStepState() {
+    blinkState = .waitingForClose
+    blinkCloseMs = 0
+    nodState = .neutral
+    holdStartMs = nil
+    baselineYaw = nil
+    baselinePitch = nil
+    baselineSamples.removeAll()
+    nodPeakDPitch = 0
   }
 
   private enum BlinkState {
-    case waitingForOpen
-    case waitingForClosed
-    case waitingForOpenAgain
+    case waitingForClose
+    case closed
   }
 
   private enum NodState {
-    case waitingForDown
-    case waitingForUp
+    case neutral
+    case down
   }
 }

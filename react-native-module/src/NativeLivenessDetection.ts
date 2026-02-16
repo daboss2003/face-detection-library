@@ -10,6 +10,11 @@ export type LivenessFailureEvent = {
   reason: string;
 };
 
+export type LivenessFaceInOvalEvent = {
+  inside: boolean;
+  reason?: string;
+};
+
 export type LivenessResult = {
   imageBase64: string;
 };
@@ -23,6 +28,7 @@ export interface Spec extends TurboModule {
   stop(): void;
   addListener(eventName: "challengeChanged"): void;
   addListener(eventName: "failure"): void;
+  addListener(eventName: "faceInOval"): void;
   removeListeners(count: number): void;
 }
 

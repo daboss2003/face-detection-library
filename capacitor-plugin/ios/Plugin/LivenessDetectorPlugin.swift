@@ -90,4 +90,10 @@ public class LivenessDetectorPlugin: CAPPlugin, LivenessDetectorDelegate {
     pendingCall = nil
     stopInternal()
   }
+
+  public func onFaceInOval(inside: Bool, reason: String?) {
+    var data: [AnyHashable: Any] = ["inside": inside]
+    if let reason { data["reason"] = reason }
+    notifyListeners("faceInOval", data: data)
+  }
 }

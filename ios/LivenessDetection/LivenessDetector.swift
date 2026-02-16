@@ -7,10 +7,12 @@ import MediaPipeTasksVision
   func onLivenessPassed(imageData: Data)
   func onFailure(reason: String)
   func onFaceDetected(boundingBox: CGRect?)
+  func onFaceInOval(inside: Bool, reason: String?)
 }
 
 public extension LivenessDetectorDelegate {
   func onFaceDetected(boundingBox: CGRect?) {}
+  func onFaceInOval(inside: Bool, reason: String?) {}
 }
 
 @objc public final class LivenessDetector: NSObject {
@@ -18,11 +20,17 @@ public extension LivenessDetectorDelegate {
     "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"
   private let config: LivenessConfig
   private weak var delegate: LivenessDetectorDelegate?
+  private var steps: [LivenessStep]
   private var stateMachine: LivenessStateMachine
   private var cameraService: CameraService?
   private var landmarker: FaceLandmarkerPipeline?
   private var latestMetrics: FaceMetrics?
   private var captureScheduled = false
+  private var captureActive = false
+  private var captureAttempts = 0
+  private var captureDelayWorkItem: DispatchWorkItem?
+  private var sessionTimeoutWorkItem: DispatchWorkItem?
+  private var lastOvalState: Bool?
   private let workQueue = DispatchQueue(label: "com.liveness.detector.queue")
 
   @objc public init(
@@ -32,7 +40,8 @@ public extension LivenessDetectorDelegate {
   ) {
     self.config = config
     self.delegate = delegate
-    self.stateMachine = LivenessStateMachine(config: config)
+    self.steps = LivenessStep.allCases
+    self.stateMachine = LivenessStateMachine(config: config, steps: self.steps)
     self.modelPath = modelPath
   }
 
@@ -71,11 +80,14 @@ public extension LivenessDetectorDelegate {
   private func startInternal(previewView: UIView?, useFrontCamera: Bool, modelPath: String?) {
     stop()
     let nowMs = nowMilliseconds()
+    steps = buildSteps()
+    stateMachine = LivenessStateMachine(config: config, steps: steps)
     stateMachine.reset(nowMs: nowMs)
     delegate?.onChallengeChanged(
-      stepIndex: LivenessStep.allCases.first?.rawValue ?? 0,
-      stepLabel: LivenessStep.allCases.first?.label ?? ""
+      stepIndex: 0,
+      stepLabel: steps.first?.label ?? ""
     )
+    startSessionTimeout()
 
     let camera = CameraService(previewView: previewView, cameraPosition: useFrontCamera ? .front : .back)
     camera.delegate = self
@@ -96,39 +108,113 @@ public extension LivenessDetectorDelegate {
 
   @objc public func stop() {
     captureScheduled = false
+    captureActive = false
+    captureAttempts = 0
+    captureDelayWorkItem?.cancel()
+    captureDelayWorkItem = nil
+    sessionTimeoutWorkItem?.cancel()
+    sessionTimeoutWorkItem = nil
     cameraService?.stop()
     cameraService = nil
     landmarker = nil
     latestMetrics = nil
+    lastOvalState = nil
   }
 
   private func scheduleCapture() {
     if captureScheduled { return }
     captureScheduled = true
-    let delay = DispatchTime.now() + .milliseconds(Int(config.captureDelayMs))
-    workQueue.asyncAfter(deadline: delay) { [weak self] in
-      guard let self else { return }
-      guard let metrics = self.latestMetrics else {
-        self.delegate?.onFailure(reason: "No face available for capture")
-        self.stop()
-        return
-      }
-      if abs(metrics.yaw) > self.config.frontalYawThreshold ||
-        abs(metrics.pitch) > self.config.frontalPitchThreshold ||
-        metrics.avgEar < self.config.blinkOpenThreshold {
-        self.delegate?.onFailure(reason: "Final check failed (frontal + eyes open required)")
-        self.stop()
-        return
-      }
+    captureActive = false
+    captureAttempts = 0
+    delegate?.onChallengeChanged(stepIndex: -1, stepLabel: "Relax and look at the camera")
 
-      self.cameraService?.capturePhoto(onSuccess: { data in
+    captureDelayWorkItem?.cancel()
+    let workItem = DispatchWorkItem { [weak self] in
+      self?.captureActive = true
+    }
+    captureDelayWorkItem = workItem
+    workQueue.asyncAfter(deadline: .now() + .milliseconds(Int(config.captureDelayMs)), execute: workItem)
+  }
+
+  private func attemptCapture(metrics: FaceMetrics) {
+    captureAttempts += 1
+    let headFrontal = abs(metrics.yaw) <= config.captureMaxYaw &&
+      abs(metrics.pitch) <= config.captureMaxPitch
+    let eyesOpen = metrics.blinkScore > 0
+      ? metrics.blinkScore < config.captureMaxBlinkScore
+      : metrics.avgEar >= config.captureMinEar
+    let mouthClosed = metrics.mouthScore > 0
+      ? metrics.mouthScore < config.captureMaxMouthScore
+      : metrics.mouthMar < config.captureMaxMar
+
+    if headFrontal && eyesOpen && mouthClosed {
+      captureActive = false
+      cameraService?.capturePhoto(onSuccess: { data in
         self.delegate?.onLivenessPassed(imageData: data)
         self.stop()
       }, onFailure: { error in
         self.delegate?.onFailure(reason: error)
         self.stop()
       })
+      return
     }
+
+    if captureAttempts >= config.captureMaxAttempts {
+      delegate?.onFailure(reason: "Please look straight at the camera with a relaxed expression.")
+      stop()
+    }
+  }
+
+  private func checkFaceInOval(
+    metrics: FaceMetrics,
+    isHeadTurnStep: Bool
+  ) -> (Bool, String?) {
+    let dy = (metrics.faceCy - config.ovalCy) / config.ovalRy
+    let dx = (metrics.faceCx - config.ovalCx) / config.ovalRx
+
+    let inEllipse: Bool
+    if isHeadTurnStep {
+      inEllipse = abs(dy) <= 1
+    } else {
+      inEllipse = dx * dx + dy * dy <= 1
+    }
+
+    if !inEllipse {
+      let reason: String
+      if abs(dy) >= abs(dx) {
+        reason = dy < 0 ? "Move down slightly" : "Move up slightly"
+      } else {
+        reason = dx < 0 ? "Move right" : "Move left"
+      }
+      return (false, reason)
+    }
+
+    if metrics.faceSize < config.minFaceSize {
+      return (false, "Move closer to the camera")
+    }
+    if metrics.faceSize > config.maxFaceSize {
+      return (false, "Move back a little")
+    }
+
+    return (true, nil)
+  }
+
+  private func buildSteps() -> [LivenessStep] {
+    var list = Array(LivenessStep.allCases)
+    if config.shuffleSteps { list.shuffle() }
+    return list
+  }
+
+  private func startSessionTimeout() {
+    sessionTimeoutWorkItem?.cancel()
+    let workItem = DispatchWorkItem { [weak self] in
+      DispatchQueue.main.async {
+        self?.delegate?.onFailure(reason: "Timed out. Please try again.")
+        self?.stop()
+      }
+    }
+    sessionTimeoutWorkItem = workItem
+    workQueue.asyncAfter(deadline: .now() + .milliseconds(Int(config.sessionTimeoutMs)), execute: workItem)
   }
 
   private func nowMilliseconds() -> Int64 {
@@ -149,15 +235,38 @@ extension LivenessDetector: CameraServiceDelegate {
 
 extension LivenessDetector: FaceLandmarkerPipelineDelegate {
   func faceLandmarkerPipeline(_ pipeline: FaceLandmarkerPipeline, didOutput result: FaceLandmarkerResult, imageSize: CGSize) {
-    guard let metrics = FaceMetricsExtractor.extract(result: result, imageSize: imageSize) else { return }
+    guard let metrics = FaceMetricsExtractor.extract(result: result, imageSize: imageSize) else {
+      if lastOvalState != false {
+        lastOvalState = false
+        delegate?.onFaceInOval(inside: false, reason: "No face detected")
+      }
+      return
+    }
     latestMetrics = metrics
     delegate?.onFaceDetected(boundingBox: metrics.boundingBox)
-    let update = stateMachine.update(metrics: metrics, nowMs: metrics.timestampMs)
+    let currentStep = (!captureScheduled && !steps.isEmpty) ? stateMachine.currentStep() : nil
+    let isHeadTurnStep = currentStep == .turnLeft || currentStep == .turnRight
+    let (insideOval, reason) = currentStep != nil
+      ? checkFaceInOval(metrics: metrics, isHeadTurnStep: isHeadTurnStep)
+      : (true, nil)
+    if insideOval != lastOvalState {
+      lastOvalState = insideOval
+      delegate?.onFaceInOval(inside: insideOval, reason: reason)
+    }
+
+    if captureActive {
+      attemptCapture(metrics: metrics)
+      return
+    }
+
+    if !insideOval { return }
+
+    let update = stateMachine.update(metrics: metrics, nowMs: metrics.timestampMs, insideOval: true)
     switch update {
     case .none:
       break
-    case .stepChanged(let step):
-      delegate?.onChallengeChanged(stepIndex: step.rawValue, stepLabel: step.label)
+    case .stepChanged(let stepIndex, let stepLabel):
+      delegate?.onChallengeChanged(stepIndex: stepIndex, stepLabel: stepLabel)
     case .failed(let reason):
       delegate?.onFailure(reason: reason)
       stop()
