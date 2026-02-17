@@ -1,17 +1,17 @@
-# @daboss/liveness-web
+# @daboss2003/liveness-web
 
 Lightweight web liveness detection using MediaPipe Face Landmarker (CDN). The SDK provides the full UI: oval face frame, camera, and step progress. You only supply callbacks.
 
 ## Install
 
 ```
-npm install @daboss/liveness-web
+npm install @daboss2003/liveness-web
 ```
 
 ## Usage
 
 ```ts
-import { startLiveness } from "@daboss/liveness-web";
+import { startLiveness } from "@daboss2003/liveness-web";
 
 startLiveness({
   container: document.getElementById("root"), // optional; defaults to document.body
@@ -37,7 +37,7 @@ startLiveness({
 To cancel and release the camera:
 
 ```ts
-import { stop } from "@daboss/liveness-web";
+import { stop } from "@daboss2003/liveness-web";
 stop();
 ```
 
@@ -51,7 +51,7 @@ When CDN or connectivity fails, `onFailure` is called with a string you can comp
 Example:
 
 ```ts
-import { startLiveness, LIVENESS_ERROR_CDN_NOT_AVAILABLE, isCdnNotAvailableError } from "@daboss/liveness-web";
+import { startLiveness, LIVENESS_ERROR_CDN_NOT_AVAILABLE, isCdnNotAvailableError } from "@daboss2003/liveness-web";
 
 startLiveness({
   callbacks: {

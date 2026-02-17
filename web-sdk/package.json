@@ -1,6 +1,6 @@
 {
-  "name": "@daboss/liveness-web",
-  "version": "0.1.0",
+  "name": "@daboss2003/liveness-web",
+  "version": "1.0.0",
   "description": "Web liveness detection using MediaPipe Face Landmarker (CDN)",
   "keywords": [
     "liveness",
@@ -12,10 +12,16 @@
   "main": "dist/index.js",
   "module": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
   "files": [
     "dist/",
-    "src/",
-    "public/"
+    "src/"
   ],
   "license": "Apache-2.0",
   "repository": {
