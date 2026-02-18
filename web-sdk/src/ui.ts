@@ -15,8 +15,8 @@ const OVAL_H = 360;
 const OVAL_TOP_PCT = 40;
 
 // Approximate ellipse perimeter via Ramanujan's formula so pathLength matches
-const RX = OVAL_W / 2 - 2;
-const RY = OVAL_H / 2 - 2;
+const RX = OVAL_W / 2;
+const RY = OVAL_H / 2;
 const ELLIPSE_PERIMETER = Math.PI * (3 * (RX + RY) - Math.sqrt((3 * RX + RY) * (RX + 3 * RY)));
 
 type HintKind = "left" | "blink" | "right" | "nod" | "mouth";
@@ -55,6 +55,9 @@ function createStyles(): HTMLStyleElement {
       display: flex;
       flex-direction: column;
       align-items: center;
+      --oval-w: min(72vmin, ${OVAL_W}px);
+      --oval-h: min(96vmin, ${OVAL_H}px);
+      --oval-half-h: calc(var(--oval-h) / 2);
     }
 
     /* ── Full-bleed video behind everything ─────────────────────────────── */
@@ -81,8 +84,8 @@ function createStyles(): HTMLStyleElement {
       position: absolute;
       inset: 0;
       /* The mask punches a transparent oval at 50% x, OVAL_TOP_PCT% y */
-      --ow: min(72vw, ${OVAL_W}px);
-      --oh: min(90vw, ${OVAL_H}px);
+      --ow: var(--oval-w);
+      --oh: var(--oval-h);
       background: var(--lv-dark);
       -webkit-mask-image: radial-gradient(
         ellipse var(--ow) var(--oh) at 50% ${OVAL_TOP_PCT}%,
@@ -106,16 +109,11 @@ function createStyles(): HTMLStyleElement {
       left: 50%;
       top: ${OVAL_TOP_PCT}%;
       transform: translate(-50%, -50%);
-      width: min(72vw, ${OVAL_W}px);
-      height: min(90vw, ${OVAL_H}px);
+      width: var(--oval-w);
+      height: var(--oval-h);
       pointer-events: none;
     }
     .lv-ring-wrap svg { width: 100%; height: 100%; overflow: visible; }
-    .lv-ring-track {
-      fill: none;
-      stroke: rgba(255,255,255,0.15);
-      stroke-width: 3.5;
-    }
     .lv-ring-progress {
       fill: none;
       stroke: var(--lv-green);
@@ -149,7 +147,7 @@ function createStyles(): HTMLStyleElement {
     .lv-dots {
       position: absolute;
       z-index: 2;
-      top: calc(${OVAL_TOP_PCT}% + min(45vw, ${OVAL_H / 2}px) + 20px);
+      top: calc(${OVAL_TOP_PCT}% + var(--oval-half-h) + 20px);
       left: 50%;
       transform: translateX(-50%);
       display: flex;
@@ -167,7 +165,7 @@ function createStyles(): HTMLStyleElement {
     .lv-instruction {
       position: absolute;
       z-index: 2;
-      top: calc(${OVAL_TOP_PCT}% + min(45vw, ${OVAL_H / 2}px) + 52px);
+      top: calc(${OVAL_TOP_PCT}% + var(--oval-half-h) + 52px);
       left: 50%;
       transform: translateX(-50%);
       white-space: nowrap;
@@ -183,7 +181,7 @@ function createStyles(): HTMLStyleElement {
     .lv-pos-hint {
       position: absolute;
       z-index: 2;
-      top: calc(${OVAL_TOP_PCT}% + min(45vw, ${OVAL_H / 2}px) + 84px);
+      top: calc(${OVAL_TOP_PCT}% + var(--oval-half-h) + 84px);
       left: 50%;
       transform: translateX(-50%);
       font-size: 13px;
@@ -301,9 +299,6 @@ export function startLivenessWithUI(options: StartLivenessOptions): LivenessEngi
   ringWrap.className = "lv-ring-wrap";
   ringWrap.innerHTML = `
     <svg viewBox="0 0 ${OVAL_W} ${OVAL_H}">
-      <ellipse class="lv-ring-track"
-        cx="${rx}" cy="${ry}" rx="${RX}" ry="${RY}"
-        pathLength="${ELLIPSE_PERIMETER.toFixed(1)}"/>
       <ellipse class="lv-ring-progress"
         cx="${rx}" cy="${ry}" rx="${RX}" ry="${RY}"
         pathLength="${ELLIPSE_PERIMETER.toFixed(1)}"
