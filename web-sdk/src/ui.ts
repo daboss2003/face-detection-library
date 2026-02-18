@@ -14,9 +14,10 @@ const OVAL_W = 270;
 const OVAL_H = 360;
 const OVAL_TOP_PCT = 40;
 
-// Approximate ellipse perimeter via Ramanujan's formula so pathLength matches
-const RX = OVAL_W / 2;
-const RY = OVAL_H / 2;
+// Progress stroke sits on the main oval: ellipse inset by half stroke so outer edge aligns with cutout
+const STROKE_HALF = 1.75;
+const RX = OVAL_W / 2 - STROKE_HALF;
+const RY = OVAL_H / 2 - STROKE_HALF;
 const ELLIPSE_PERIMETER = Math.PI * (3 * (RX + RY) - Math.sqrt((3 * RX + RY) * (RX + 3 * RY)));
 
 type HintKind = "left" | "blink" | "right" | "nod" | "mouth";
@@ -57,7 +58,8 @@ function createStyles(): HTMLStyleElement {
       align-items: center;
       --oval-w: min(72vmin, ${OVAL_W}px);
       --oval-h: min(96vmin, ${OVAL_H}px);
-      --oval-half-h: calc(var(--oval-h) / 2);
+      /* Half-height of the visible oval for positioning (oval uses full w/h as radii) */
+      --oval-half-h: var(--oval-h);
     }
 
     /* ── Full-bleed video behind everything ─────────────────────────────── */
@@ -83,7 +85,7 @@ function createStyles(): HTMLStyleElement {
     .lv-overlay {
       position: absolute;
       inset: 0;
-      /* The mask punches a transparent oval at 50% x, OVAL_TOP_PCT% y */
+      /* Ellipse size (radii): full oval w/h so cutout is large; ring is scaled to match */
       --ow: var(--oval-w);
       --oh: var(--oval-h);
       background: var(--lv-dark);
@@ -103,14 +105,14 @@ function createStyles(): HTMLStyleElement {
       background: rgba(180,0,0,0.55);
     }
 
-    /* ── Oval SVG ring ───────────────────────────────────────────────────── */
+    /* ── Oval SVG ring (2× so progress sits on the main oval boundary) ───── */
     .lv-ring-wrap {
       position: absolute;
       left: 50%;
       top: ${OVAL_TOP_PCT}%;
       transform: translate(-50%, -50%);
-      width: var(--oval-w);
-      height: var(--oval-h);
+      width: calc(2 * var(--oval-w));
+      height: calc(2 * var(--oval-h));
       pointer-events: none;
     }
     .lv-ring-wrap svg { width: 100%; height: 100%; overflow: visible; }
@@ -315,10 +317,10 @@ export function startLivenessWithUI(options: StartLivenessOptions): LivenessEngi
   root.appendChild(hintIcon);
 
   // ── Header ─────────────────────────────────────────────────────────────────
-  const header = document.createElement("div");
-  header.className = "lv-header";
-  header.innerHTML = `<span class="lv-header-title">Face Verification</span>`;
-  root.appendChild(header);
+  // const header = document.createElement("div");
+  // header.className = "lv-header";
+  // header.innerHTML = `<span class="lv-header-title">Face Verification</span>`;
+  // root.appendChild(header);
 
   // ── Step dots ──────────────────────────────────────────────────────────────
   const dotsEl = document.createElement("div");
