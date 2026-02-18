@@ -56,9 +56,9 @@ function createStyles(): HTMLStyleElement {
       display: flex;
       flex-direction: column;
       align-items: center;
-      /* Scale with viewport so oval is smaller on mobile; cap at desktop size */
-      --oval-w: min(65vmin, ${OVAL_W}px);
-      --oval-h: min(87vmin, ${OVAL_H}px);
+      /* Radii: keep oval inside viewport on mobile (diameter = 2× this), cap at desktop */
+      --oval-w: min(45vmin, ${OVAL_W}px);
+      --oval-h: min(60vmin, ${OVAL_H}px);
       /* Half-height of the visible oval for positioning (oval uses full w/h as radii) */
       --oval-half-h: var(--oval-h);
     }
