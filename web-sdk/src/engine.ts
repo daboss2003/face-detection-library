@@ -260,24 +260,35 @@ export class LivenessEngine {
   private lastDetectTs   = -1;
   private lastOvalState: boolean | null = null;
   private stepSoundPlayedForCurrentStep = false;
-  private currentStepAudio: HTMLAudioElement | null = null;
-  private currentStepAudioCleanup: (() => void) | null = null;
+  private currentAudio: HTMLAudioElement | null = null;
+  private currentAudioCleanup: (() => void) | null = null;
+  private currentAudioToken = 0;
   private sessionTimeoutId: number | null = null;
 
   constructor(private opts: LivenessOptions) {}
 
   private playSound(url: string, onEnded?: () => void): void {
+    this.stopAllSounds();
+    const token = ++this.currentAudioToken;
     const a = new Audio(url);
-    if (onEnded) {
-      const done = () => {
-        a.removeEventListener("ended", done);
-        a.removeEventListener("error", done);
-        onEnded();
-      };
-      a.addEventListener("ended", done);
-      a.addEventListener("error", done);
-    }
-    a.play().catch(() => onEnded?.());
+    a.preload = "auto";
+    const done = () => {
+      if (token !== this.currentAudioToken) return;
+      a.removeEventListener("ended", done);
+      a.removeEventListener("error", done);
+      if (this.currentAudio === a) this.currentAudio = null;
+      if (this.currentAudioCleanup === cleanup) this.currentAudioCleanup = null;
+      onEnded?.();
+    };
+    const cleanup = () => {
+      a.removeEventListener("ended", done);
+      a.removeEventListener("error", done);
+    };
+    this.currentAudio = a;
+    this.currentAudioCleanup = cleanup;
+    a.addEventListener("ended", done);
+    a.addEventListener("error", done);
+    a.play().catch(() => done());
   }
 
   private getSoundUrl(key: string): string | undefined {
@@ -296,33 +307,18 @@ export class LivenessEngine {
     if (!key) return;
     const url = this.getSoundUrl(key);
     if (!url) return;
-    this.stopStepSound();
-    const a = new Audio(url);
-    const done = () => {
-      a.removeEventListener("ended", done);
-      a.removeEventListener("error", done);
-      if (this.currentStepAudio === a) this.currentStepAudio = null;
-      if (this.currentStepAudioCleanup === cleanup) this.currentStepAudioCleanup = null;
-    };
-    const cleanup = () => {
-      a.removeEventListener("ended", done);
-      a.removeEventListener("error", done);
-    };
-    this.currentStepAudio = a;
-    this.currentStepAudioCleanup = cleanup;
-    a.addEventListener("ended", done);
-    a.addEventListener("error", done);
-    a.play().catch(() => done());
+    this.playSound(url);
   }
 
-  private stopStepSound(): void {
-    if (this.currentStepAudio) {
-      this.currentStepAudio.pause();
-      this.currentStepAudio.currentTime = 0;
+  private stopAllSounds(): void {
+    this.currentAudioToken += 1;
+    if (this.currentAudio) {
+      this.currentAudio.pause();
+      this.currentAudio.currentTime = 0;
     }
-    this.currentStepAudioCleanup?.();
-    this.currentStepAudioCleanup = null;
-    this.currentStepAudio = null;
+    this.currentAudioCleanup?.();
+    this.currentAudioCleanup = null;
+    this.currentAudio = null;
   }
 
   private clearSessionTimeout(): void {
@@ -378,7 +374,7 @@ export class LivenessEngine {
   private stopDetectionOnly(): void {
     this.running = false;
     this.clearSessionTimeout();
-    this.stopStepSound();
+    this.stopAllSounds();
     if (this.rafId != null) { cancelAnimationFrame(this.rafId); this.rafId = null; }
     if (this.landmarker)    { this.landmarker.close(); this.landmarker = null; }
   }
@@ -629,7 +625,7 @@ export class LivenessEngine {
   }
 
   private advanceStep(now: number): "passed" | "none" {
-    this.stopStepSound();
+    this.stopAllSounds();
     this.stepIndex += 1;
     if (this.stepIndex >= this.steps.length) {
       this.playGoodSound();
