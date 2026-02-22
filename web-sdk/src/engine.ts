@@ -158,9 +158,7 @@ function shuffleArray<T>(array: readonly T[]): T[] {
   return out;
 }
 
-const steps: LivenessStep[] = shuffleArray(STEP_LABELS).map((label, index) => ({ index, label }));
-
-export const LIVENESS_STEP_COUNT = steps.length;
+export const LIVENESS_STEP_COUNT = STEP_LABELS.length;
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  KEY DESIGN: RELATIVE MEASUREMENT
@@ -193,19 +191,19 @@ const config = {
   headTurnHoldMs:         80,   // sustain the turned pose for this long
 
   // ── Nod (relative to baseline) ────────────────────────────────────────────
-  nodDownDelta:            4,   // chin must DROP by this many degrees from baseline
-  nodReturnFraction:      0.75, // return to 75% of peak nod depth to complete
-  nodReturnMaxDelta:       9,   // cap: never require returning past 9° from baseline
-  maxYawDuringNod:        32,
+  nodDownDelta:            3,   // chin must DROP by this many degrees from baseline
+  nodReturnFraction:      0.85, // return to 85% of peak nod depth to complete
+  nodReturnMaxDelta:      12,   // cap: never require returning past 12° from baseline
+  maxYawDuringNod:        40,
 
   // ── Blink ──────────────────────────────────────────────────────────────────
-  blinkClosedThreshold:  0.35,  // blendshape score = eyes closed
-  blinkOpenThreshold:    0.20,  // blendshape score = eyes open
+  blinkClosedThreshold:  0.30,  // blendshape score = eyes closed
+  blinkOpenThreshold:    0.25,  // blendshape score = eyes open
   earClosedThreshold:    0.20,
   earOpenThreshold:      0.25,
   blinkMaxDurationMs:   4000,
-  maxYawDuringBlink:     25,
-  maxPitchDuringBlink:   25,
+  maxYawDuringBlink:     30,
+  maxPitchDuringBlink:   30,
 
   // ── Mouth ──────────────────────────────────────────────────────────────────
   mouthOpenThreshold:    0.20,  // jawOpen blendshape
@@ -242,6 +240,7 @@ export class LivenessEngine {
   private rafId:       number | null = null;
   private stream:      MediaStream | null = null;
 
+  private steps: LivenessStep[] = [];
   private stepIndex   = 0;
   private stepStart   = 0;
 
@@ -350,6 +349,7 @@ export class LivenessEngine {
   async start(): Promise<void> {
     this.stopDetectionOnly();
     this.running      = true;
+    this.steps        = shuffleArray(STEP_LABELS).map((label, index) => ({ index, label }));
     this.stepIndex    = 0;
     this.lastDetectTs = -1;
     this.lastOvalState = null;
@@ -361,7 +361,9 @@ export class LivenessEngine {
     this.sessionTimeoutId = setTimeout(() => {
       if (this.running) this.fail("Timed out. Please try again.");
     }, config.sessionTimeoutMs);
-    this.opts.callbacks?.onChallengeChanged?.(steps[0].index, steps[0].label);
+    if (this.steps.length > 0) {
+      this.opts.callbacks?.onChallengeChanged?.(this.steps[0].index, this.steps[0].label);
+    }
     await this.ensureVideo();
     this.landmarker = await createLandmarkerWithRetry(this.opts, MAX_CDN_RETRIES);
     this.loop();
@@ -455,13 +457,13 @@ export class LivenessEngine {
 
       this.opts.callbacks?.onDebugFrame?.({
         hasFace: true, metrics,
-        step: steps[this.stepIndex]?.label ?? "done",
+        step: this.steps[this.stepIndex]?.label ?? "done",
       });
 
       if (inside) {
-        if (!this.stepSoundPlayedForCurrentStep && this.stepIndex < steps.length) {
+        if (!this.stepSoundPlayedForCurrentStep && this.stepIndex < this.steps.length) {
           this.stepSoundPlayedForCurrentStep = true;
-          this.playStepSound(steps[this.stepIndex].label);
+          this.playStepSound(this.steps[this.stepIndex].label);
         }
         if (this.updateState(metrics, now) === "passed") {
           this.scheduleCapture();
@@ -475,7 +477,7 @@ export class LivenessEngine {
       }
       this.opts.callbacks?.onDebugFrame?.({
         hasFace: false, metrics: null,
-        step: steps[this.stepIndex]?.label ?? "done",
+        step: this.steps[this.stepIndex]?.label ?? "done",
       });
     }
 
@@ -485,7 +487,7 @@ export class LivenessEngine {
   // ── Oval check ─────────────────────────────────────────────────────────────
 
   private checkFaceInOval(m: Metrics): { inside: boolean; reason?: string } {
-    const isHeadTurn = config.headTurnSteps.has(steps[this.stepIndex]?.label ?? "");
+    const isHeadTurn = config.headTurnSteps.has(this.steps[this.stepIndex]?.label ?? "");
     const mx = 1 - m.faceCx; // mirror x to match CSS scaleX(-1)
     const dy = (m.faceCy - config.ovalCy) / config.ovalRy;
     const dx = (mx - config.ovalCx) / config.ovalRx;
@@ -529,7 +531,7 @@ export class LivenessEngine {
     const dYaw   = metrics.yaw   - bYaw;
     const dPitch = metrics.pitch - bPitch;
 
-    switch (steps[this.stepIndex].label) {
+    switch (this.steps[this.stepIndex]?.label) {
 
       // ── LEFT turn (negative yaw delta = turning left from rest) ─────────────
       case "Turn your head LEFT": {
@@ -629,16 +631,18 @@ export class LivenessEngine {
   private advanceStep(now: number): "passed" | "none" {
     this.stopStepSound();
     this.stepIndex += 1;
-    if (this.stepIndex >= steps.length) {
+    if (this.stepIndex >= this.steps.length) {
       this.playGoodSound();
       return "passed";
     }
     this.stepStart = now + config.readyMs;
     this.resetStepState();
     this.stepSoundPlayedForCurrentStep = true;
-    const step = steps[this.stepIndex];
-    this.opts.callbacks?.onChallengeChanged?.(step.index, step.label);
-    this.playGoodSound(() => this.playStepSound(step.label));
+    const step = this.steps[this.stepIndex];
+    if (step) {
+      this.opts.callbacks?.onChallengeChanged?.(step.index, step.label);
+      this.playGoodSound(() => this.playStepSound(step.label));
+    }
     return "none";
   }
 
