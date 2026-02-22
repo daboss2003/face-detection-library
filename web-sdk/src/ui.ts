@@ -79,7 +79,19 @@ function createStyles(): HTMLStyleElement {
       object-fit: cover;
       /* Mirror so it feels like a selfie camera */
       transform: scaleX(-1);
+      opacity: 0;
+      transition: opacity 0.2s ease;
       /* Clip the video to the oval using clip-path on the parent */
+    }
+    .lv-video.is-playing { opacity: 1; }
+    .lv-video::-webkit-media-controls,
+    .lv-video::-webkit-media-controls-panel,
+    .lv-video::-webkit-media-controls-play-button,
+    .lv-video::-webkit-media-controls-start-playback-button,
+    .lv-video::-webkit-media-controls-overlay-play-button,
+    .lv-video::-webkit-media-controls-enclosure {
+      display: none !important;
+      -webkit-appearance: none;
     }
 
     /* ── Dark overlay with oval cutout ──────────────────────────────────── */
@@ -287,6 +299,7 @@ export function startLivenessWithUI(options: StartLivenessOptions): LivenessEngi
   video.className = "lv-video";
   video.setAttribute("autoplay", "");
   video.setAttribute("playsinline", "");
+  video.setAttribute("webkit-playsinline", "");
   video.setAttribute("muted", "");
   videoBg.appendChild(video);
   root.appendChild(videoBg);
@@ -391,6 +404,9 @@ export function startLivenessWithUI(options: StartLivenessOptions): LivenessEngi
 
   function cleanup(): void {
     engine.stop();
+    video.removeEventListener("playing", onVideoPlaying);
+    video.removeEventListener("pause", onVideoPause);
+    video.removeEventListener("waiting", onVideoPause);
     root.remove();
   }
 
@@ -399,6 +415,12 @@ export function startLivenessWithUI(options: StartLivenessOptions): LivenessEngi
   const sounds: LivenessSoundOptions = options.sounds ?? {
     ...(Object.keys(DEFAULT_SOUND_DATA_URLS).length > 0 ? DEFAULT_SOUND_DATA_URLS : { baseUrl: "audios/" }),
   };
+
+  const onVideoPlaying = () => video.classList.add("is-playing");
+  const onVideoPause = () => video.classList.remove("is-playing");
+  video.addEventListener("playing", onVideoPlaying);
+  video.addEventListener("pause", onVideoPause);
+  video.addEventListener("waiting", onVideoPause);
 
   const engine = new LivenessEngine({
     videoElement: video,

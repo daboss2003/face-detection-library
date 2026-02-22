@@ -188,15 +188,15 @@ const config = {
   baselineFrames: 8,
 
   // ── Head turns (relative to baseline) ─────────────────────────────────────
-  yawTurnDelta:           12,   // degrees of YAW change needed from rest
+  yawTurnDelta:            9,   // degrees of YAW change needed from rest
   yawWrongDirDelta:       16,   // block if turned clearly the WRONG way
-  headTurnHoldMs:        120,   // sustain the turned pose for this long
+  headTurnHoldMs:         80,   // sustain the turned pose for this long
 
   // ── Nod (relative to baseline) ────────────────────────────────────────────
-  nodDownDelta:            8,   // chin must DROP by this many degrees from baseline
-  nodReturnFraction:      0.40, // return to 40% of peak nod depth to complete
-  nodReturnMaxDelta:       5,   // cap: never require returning past 5° from baseline
-  maxYawDuringNod:        22,
+  nodDownDelta:            4,   // chin must DROP by this many degrees from baseline
+  nodReturnFraction:      0.75, // return to 75% of peak nod depth to complete
+  nodReturnMaxDelta:       9,   // cap: never require returning past 9° from baseline
+  maxYawDuringNod:        32,
 
   // ── Blink ──────────────────────────────────────────────────────────────────
   blinkClosedThreshold:  0.35,  // blendshape score = eyes closed
@@ -208,11 +208,11 @@ const config = {
   maxPitchDuringBlink:   25,
 
   // ── Mouth ──────────────────────────────────────────────────────────────────
-  mouthOpenThreshold:    0.28,  // jawOpen blendshape
-  mouthOpenMarThreshold: 0.28,
-  mouthHoldMs:          120,
-  maxYawDuringMouth:     25,
-  maxPitchDuringMouth:   25,
+  mouthOpenThreshold:    0.20,  // jawOpen blendshape
+  mouthOpenMarThreshold: 0.20,
+  mouthHoldMs:           50,
+  maxYawDuringMouth:     35,
+  maxPitchDuringMouth:   35,
 
   // ── Face-in-oval ───────────────────────────────────────────────────────────
   ovalCx:       0.50,
