@@ -1,6 +1,6 @@
 {
   "name": "@daboss2003/liveness-web",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Web liveness detection using MediaPipe Face Landmarker (CDN)",
   "keywords": [
     "liveness",
