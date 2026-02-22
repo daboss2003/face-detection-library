@@ -94,6 +94,44 @@ function createStyles(): HTMLStyleElement {
       -webkit-appearance: none;
     }
 
+    .lv-root.lv-is-loading .lv-ring-wrap,
+    .lv-root.lv-is-loading .lv-dots,
+    .lv-root.lv-is-loading .lv-instruction,
+    .lv-root.lv-is-loading .lv-pos-hint,
+    .lv-root.lv-is-loading .lv-hint-icon {
+      opacity: 0;
+      pointer-events: none;
+    }
+    .lv-root:not(.lv-is-loading) .lv-loading { display: none; }
+    .lv-loading {
+      position: absolute;
+      z-index: 2;
+      left: 50%;
+      top: ${OVAL_TOP_PCT}%;
+      transform: translate(-50%, -50%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      text-align: center;
+      color: var(--lv-white);
+      text-shadow: 0 1px 6px rgba(0,0,0,0.5);
+    }
+    .lv-spinner {
+      width: 32px;
+      height: 32px;
+      border: 3px solid rgba(255,255,255,0.25);
+      border-top-color: var(--lv-white);
+      border-radius: 50%;
+      animation: lv-spin 0.9s linear infinite;
+    }
+    .lv-loading-text {
+      font-size: 13px;
+      font-weight: 500;
+      opacity: 0.9;
+    }
+    @keyframes lv-spin { to { transform: rotate(360deg); } }
+
     /* ── Dark overlay with oval cutout ──────────────────────────────────── */
     .lv-overlay {
       position: absolute;
@@ -289,7 +327,7 @@ export function startLivenessWithUI(options: StartLivenessOptions): LivenessEngi
 
   // ── Root shell ─────────────────────────────────────────────────────────────
   const root = document.createElement("div");
-  root.className = "lv-root";
+  root.className = "lv-root lv-is-loading";
   root.appendChild(createStyles());
 
   // ── Video background ───────────────────────────────────────────────────────
@@ -330,6 +368,15 @@ export function startLivenessWithUI(options: StartLivenessOptions): LivenessEngi
   hintIcon.setAttribute("aria-hidden", "true");
   root.appendChild(hintIcon);
 
+  // ── Loading spinner (shown until model is ready) ───────────────────────────
+  const loading = document.createElement("div");
+  loading.className = "lv-loading";
+  loading.innerHTML = `
+    <div class="lv-spinner" aria-hidden="true"></div>
+    <div class="lv-loading-text">Preparing camera...</div>
+  `;
+  root.appendChild(loading);
+
   // ── Header ─────────────────────────────────────────────────────────────────
   // const header = document.createElement("div");
   // header.className = "lv-header";
@@ -367,6 +414,8 @@ export function startLivenessWithUI(options: StartLivenessOptions): LivenessEngi
   const ringEl = ringWrap.querySelector(".lv-ring-progress") as SVGEllipseElement | null;
   const dots = Array.from(dotsEl.querySelectorAll(".lv-dot"));
   const P = ELLIPSE_PERIMETER;
+  let isLoading = true;
+  let pendingChallenge: { stepIndex: number; stepLabel: string } | null = null;
 
   // ── UI helpers ──────────────────────────────────────────────────────────────
 
@@ -402,6 +451,22 @@ export function startLivenessWithUI(options: StartLivenessOptions): LivenessEngi
     posHint.textContent = inside ? "" : (reason ?? "Move your face into the oval");
   }
 
+  function renderChallenge(stepIndex: number, stepLabel: string): void {
+    if (stepIndex === -1) {
+      setProgress(LIVENESS_STEP_COUNT);
+      setCapturePulse();
+      setHint(null);
+      setDots(LIVENESS_STEP_COUNT);
+      instruction.textContent = stepLabel;
+      return;
+    }
+    setProgress(stepIndex);
+    setDots(stepIndex);
+    setHint(stepLabel);
+    instruction.textContent = stepLabel;
+    ringEl?.classList.remove("lv-ring-pulse");
+  }
+
   function cleanup(): void {
     engine.stop();
     video.removeEventListener("playing", onVideoPlaying);
@@ -430,20 +495,13 @@ export function startLivenessWithUI(options: StartLivenessOptions): LivenessEngi
     sounds,
     callbacks: {
       onChallengeChanged: (stepIndex, stepLabel) => {
-        if (stepIndex === -1) {
-          setProgress(LIVENESS_STEP_COUNT);
-          setCapturePulse();
-          setHint(null);
-          setDots(LIVENESS_STEP_COUNT);
-          instruction.textContent = stepLabel;
-          return;
+        pendingChallenge = { stepIndex, stepLabel };
+        if (!isLoading) {
+          renderChallenge(stepIndex, stepLabel);
         }
-        setProgress(stepIndex);
-        setDots(stepIndex);
-        setHint(stepLabel);
-        instruction.textContent = stepLabel;
-        ringEl?.classList.remove("lv-ring-pulse");
-        options.callbacks.onChallengeChanged?.(stepIndex, stepLabel);
+        if (stepIndex !== -1) {
+          options.callbacks.onChallengeChanged?.(stepIndex, stepLabel);
+        }
       },
       onFaceInOval: (inside, reason) => {
         setFaceInOval(inside, reason);
@@ -469,7 +527,11 @@ export function startLivenessWithUI(options: StartLivenessOptions): LivenessEngi
   setHint(null);
 
   engine.start().then(
-    () => {},
+    () => {
+      isLoading = false;
+      root.classList.remove("lv-is-loading");
+      if (pendingChallenge) renderChallenge(pendingChallenge.stepIndex, pendingChallenge.stepLabel);
+    },
     (err) => {
       cleanup();
       const reason =
