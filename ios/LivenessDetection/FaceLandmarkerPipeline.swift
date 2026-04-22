@@ -22,7 +22,7 @@ final class FaceLandmarkerPipeline: NSObject {
   func setup(modelPath: String) {
     let options = FaceLandmarkerOptions()
     options.runningMode = .liveStream
-    options.numFaces = 1
+    options.numFaces = 2
     options.minFaceDetectionConfidence = config.faceDetectionConfidence
     options.minFacePresenceConfidence = config.facePresenceConfidence
     options.minTrackingConfidence = config.faceTrackingConfidence

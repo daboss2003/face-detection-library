@@ -22,28 +22,43 @@ public extension LivenessDetectorDelegate {
   @objc public static var defaultModelURL: String { defaultModelUrl }
 
   /// Presents the SDK-owned full-screen liveness UI. Callbacks run on main.
+  @objc public static func presentLiveness(
+    from viewController: UIViewController,
+    modelUrl: String?,
+    sounds: LivenessSoundOptions?,
+    config: LivenessConfig,
+    onChallengeChanged: ((Int, String) -> Void)?,
+    onFaceInOval: ((Bool, String?) -> Void)?,
+    onSuccess: @escaping (Data) -> Void,
+    onFailure: @escaping (String) -> Void
+  ) {
+    let vc = LivenessViewController.create(modelUrl: modelUrl, sounds: sounds, config: config, onSuccess: onSuccess, onFailure: onFailure)
+    vc.onChallengeChangedCallback = onChallengeChanged
+    vc.onFaceInOvalCallback = onFaceInOval
+    viewController.present(vc, animated: true)
+  }
+
+  /// Swift-friendly wrapper with default args.
   public static func presentLiveness(
     from viewController: UIViewController,
     modelUrl: String? = nil,
     sounds: LivenessSoundOptions? = nil,
+    config: LivenessConfig = LivenessConfig(),
     onSuccess: @escaping (Data) -> Void,
     onFailure: @escaping (String) -> Void
   ) {
-    let vc = LivenessViewController.create(modelUrl: modelUrl, sounds: sounds, onSuccess: onSuccess, onFailure: onFailure)
-    viewController.present(vc, animated: true)
+    presentLiveness(
+      from: viewController,
+      modelUrl: modelUrl,
+      sounds: sounds,
+      config: config,
+      onChallengeChanged: nil,
+      onFaceInOval: nil,
+      onSuccess: onSuccess,
+      onFailure: onFailure
+    )
   }
 
-  /// Obj-C friendly: pass soundBaseUrl instead of LivenessSoundOptions.
-  @objc public static func presentLiveness(
-    from viewController: UIViewController,
-    modelUrl: String?,
-    soundBaseUrl: String?,
-    onSuccess: @escaping (Data) -> Void,
-    onFailure: @escaping (String) -> Void
-  ) {
-    let sounds = soundBaseUrl.map { LivenessSoundOptions(baseUrl: $0) }
-    presentLiveness(from: viewController, modelUrl: modelUrl, sounds: sounds, onSuccess: onSuccess, onFailure: onFailure)
-  }
   private let config: LivenessConfig
   private weak var delegate: LivenessDetectorDelegate?
   private var steps: [LivenessStep]
@@ -86,10 +101,6 @@ public extension LivenessDetectorDelegate {
     self.soundPlayer = LivenessSoundPlayer(options: sounds)
   }
 
-  @objc public convenience init(delegate: LivenessDetectorDelegate) {
-    self.init(config: LivenessConfig(), modelPath: nil, delegate: delegate, sounds: nil)
-  }
-
   private var modelPath: String?
 
   @objc public func startLiveness(previewView: UIView?, useFrontCamera: Bool = true) {
@@ -105,14 +116,23 @@ public extension LivenessDetectorDelegate {
       delegate?.onFailure(reason: "Invalid model URL")
       return
     }
-    ModelDownloader.fetch(url: url) { [weak self] result in
+    ModelDownloader.fetch(
+      url: url,
+      maxAttempts: config.cdnMaxRetries,
+      attemptTimeoutMs: config.cdnAttemptTimeoutMs,
+      connectivityCheckTimeoutMs: config.connectivityCheckTimeoutMs
+    ) { [weak self] result in
       DispatchQueue.main.async {
         guard let self else { return }
         switch result {
         case .success(let fileUrl):
           self.startInternal(previewView: previewView, useFrontCamera: useFrontCamera, modelPath: fileUrl.path)
         case .failure(let error):
-          self.delegate?.onFailure(reason: "Model download failed: \(error.localizedDescription)")
+          if let livenessError = error as? LivenessError {
+            self.delegate?.onFailure(reason: livenessError.code)
+          } else {
+            self.delegate?.onFailure(reason: "Model download failed: \(error.localizedDescription)")
+          }
         }
       }
     }
@@ -286,6 +306,11 @@ extension LivenessDetector: CameraServiceDelegate {
 
 extension LivenessDetector: FaceLandmarkerPipelineDelegate {
   func faceLandmarkerPipeline(_ pipeline: FaceLandmarkerPipeline, didOutput result: FaceLandmarkerResult, imageSize: CGSize) {
+    if result.faceLandmarks.count > 1 {
+      delegate?.onFailure(reason: "Multiple faces detected. Please ensure only one person is in view.")
+      stop()
+      return
+    }
     guard let metrics = FaceMetricsExtractor.extract(result: result, imageSize: imageSize) else {
       if lastOvalState != false {
         lastOvalState = false

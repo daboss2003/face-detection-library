@@ -1,0 +1,23 @@
+{
+  "name": "liveness-demo-capacitor",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Capacitor demo for @daboss/liveness-capacitor",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite",
+    "ios": "npm run build && npx cap sync ios && npx cap run ios",
+    "android": "npm run build && npx cap sync android && npx cap run android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.0.0",
+    "@capacitor/core": "^6.0.0",
+    "@capacitor/ios": "^6.0.0",
+    "@daboss/liveness-capacitor": "file:../../capacitor-plugin"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.0.0",
+    "typescript": "^5.4.0",
+    "vite": "^5.4.0"
+  }
+}

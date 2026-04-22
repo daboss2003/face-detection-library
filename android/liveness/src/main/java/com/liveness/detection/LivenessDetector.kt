@@ -84,6 +84,11 @@ class LivenessDetector(
   }
 
   override fun onResults(result: FaceLandmarkerResult, input: MPImage, timestampMs: Long) {
+    if (result.faceLandmarks().size > 1) {
+      listener.onFailure("Multiple faces detected. Please ensure only one person is in view.")
+      stop()
+      return
+    }
     val metrics = FaceMetricsExtractor.extract(result, input.width, input.height) ?: return
     latestMetrics = metrics
     listener.onFaceDetected(metrics.boundingBox)

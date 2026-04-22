@@ -1,17 +1,17 @@
 import Foundation
 
 /// Optional sound URLs or paths for liveness prompts. Same contract as web.
-public struct LivenessSoundOptions {
-  public var baseUrl: String?
-  public var left: String?
-  public var blink: String?
-  public var right: String?
-  public var nod: String?
-  public var mouth: String?
-  public var good: String?
-  public var capture: String?
+@objc public final class LivenessSoundOptions: NSObject {
+  @objc public var baseUrl: String?
+  @objc public var left: String?
+  @objc public var blink: String?
+  @objc public var right: String?
+  @objc public var nod: String?
+  @objc public var mouth: String?
+  @objc public var good: String?
+  @objc public var capture: String?
 
-  public init(
+  @objc public init(
     baseUrl: String? = nil,
     left: String? = nil,
     blink: String? = nil,
@@ -29,6 +29,7 @@ public struct LivenessSoundOptions {
     self.mouth = mouth
     self.good = good
     self.capture = capture
+    super.init()
   }
 
   public func url(forKey key: String) -> String? {

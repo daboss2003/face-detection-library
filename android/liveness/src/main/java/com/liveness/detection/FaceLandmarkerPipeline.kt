@@ -50,7 +50,7 @@ class FaceLandmarkerPipeline(
       .setMinFaceDetectionConfidence(config.faceDetectionConfidence)
       .setMinFacePresenceConfidence(config.facePresenceConfidence)
       .setMinTrackingConfidence(config.faceTrackingConfidence)
-      .setNumFaces(1)
+      .setNumFaces(2)
       .setOutputFaceBlendshapes(true)
       .setOutputFacialTransformationMatrixes(true)
       .setRunningMode(RunningMode.LIVE_STREAM)

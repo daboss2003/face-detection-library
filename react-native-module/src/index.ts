@@ -1,7 +1,19 @@
 import { NativeEventEmitter } from "react-native";
 import NativeLivenessDetection from "./NativeLivenessDetection";
-import type { LivenessChallengeEvent, LivenessFailureEvent, LivenessFaceInOvalEvent, LivenessResult, LivenessStartOptions } from "./NativeLivenessDetection";
+import type {
+  LivenessChallengeEvent,
+  LivenessConfigOptions,
+  LivenessFailureEvent,
+  LivenessFaceInOvalEvent,
+  LivenessResult,
+  LivenessSoundOptions,
+  LivenessStartOptions,
+} from "./NativeLivenessDetection";
 export { LivenessWebView } from "./LivenessWebView";
+export {
+  LIVENESS_ERROR_CDN_NOT_AVAILABLE,
+  LIVENESS_ERROR_OFFLINE,
+} from "./NativeLivenessDetection";
 
 const emitter = new NativeEventEmitter(NativeLivenessDetection);
 
@@ -31,4 +43,12 @@ export function addFaceInOvalListener(
   return emitter.addListener("faceInOval", listener);
 }
 
-export type { LivenessChallengeEvent, LivenessFailureEvent, LivenessFaceInOvalEvent, LivenessResult };
+export type {
+  LivenessChallengeEvent,
+  LivenessConfigOptions,
+  LivenessFailureEvent,
+  LivenessFaceInOvalEvent,
+  LivenessResult,
+  LivenessSoundOptions,
+  LivenessStartOptions,
+};

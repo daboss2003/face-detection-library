@@ -13,8 +13,11 @@ public final class LivenessViewController: UIViewController, LivenessDetectorDel
   private var detector: LivenessDetector?
   private var modelUrl: String?
   private var sounds: LivenessSoundOptions?
+  private var config: LivenessConfig = LivenessConfig()
   private var onSuccess: ((Data) -> Void)?
   private var onFailure: ((String) -> Void)?
+  public var onChallengeChangedCallback: ((Int, String) -> Void)?
+  public var onFaceInOvalCallback: ((Bool, String?) -> Void)?
 
   override public func viewDidLoad() {
     super.viewDidLoad()
@@ -71,7 +74,7 @@ public final class LivenessViewController: UIViewController, LivenessDetectorDel
     super.viewDidAppear(animated)
     guard detector == nil else { return }
     instructionLabel.text = "Position your face in the oval"
-    detector = LivenessDetector(delegate: self, sounds: sounds)
+    detector = LivenessDetector(config: config, delegate: self, sounds: sounds)
     detector?.startLiveness(previewView: previewView, useFrontCamera: true, modelUrl: modelUrl ?? LivenessDetector.defaultModelURL)
   }
 
@@ -92,6 +95,9 @@ public final class LivenessViewController: UIViewController, LivenessDetectorDel
         self.overlayView.setProgress(5)
         self.overlayView.setStepDots(activeIndex: 5)
         self.hintView.setHint(stepLabel: nil)
+      }
+      if stepIndex >= 0 {
+        self.onChallengeChangedCallback?(stepIndex, stepLabel)
       }
     }
   }
@@ -119,13 +125,15 @@ public final class LivenessViewController: UIViewController, LivenessDetectorDel
       self.overlayView.setFaceInOval(inside)
       self.posHintLabel.isHidden = inside
       self.posHintLabel.text = reason ?? ""
+      self.onFaceInOvalCallback?(inside, reason)
     }
   }
 
-  static func create(modelUrl: String?, sounds: LivenessSoundOptions?, onSuccess: @escaping (Data) -> Void, onFailure: @escaping (String) -> Void) -> LivenessViewController {
+  static func create(modelUrl: String?, sounds: LivenessSoundOptions?, config: LivenessConfig = LivenessConfig(), onSuccess: @escaping (Data) -> Void, onFailure: @escaping (String) -> Void) -> LivenessViewController {
     let vc = LivenessViewController()
     vc.modelUrl = modelUrl
     vc.sounds = sounds
+    vc.config = config
     vc.onSuccess = onSuccess
     vc.onFailure = onFailure
     vc.modalPresentationStyle = .fullScreen

@@ -1,0 +1,22 @@
+{
+  "expo": {
+    "name": "Liveness Demo",
+    "slug": "liveness-demo-rn",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.liveness.demo.rn",
+      "infoPlist": {
+        "NSCameraUsageDescription": "This app uses the camera for liveness verification."
+      }
+    },
+    "android": {
+      "package": "com.liveness.demo.rn",
+      "permissions": ["android.permission.CAMERA", "android.permission.INTERNET"]
+    },
+    "plugins": ["@daboss/liveness-react-native"]
+  }
+}

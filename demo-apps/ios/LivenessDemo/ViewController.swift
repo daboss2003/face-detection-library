@@ -33,15 +33,35 @@ final class ViewController: UIViewController {
 
   @objc private func startTapped() {
     statusLabel.text = "Starting..."
+
+    // Example: per-key sounds + a few tuned thresholds. Pass defaults for web-SDK parity.
+    let sounds = LivenessSoundOptions(baseUrl: nil)
+    let config = LivenessConfig()
+    config.shuffleSteps = true
+    config.yawTurnDelta = 9
+
     LivenessDetector.presentLiveness(
       from: self,
       modelUrl: nil,
-      sounds: nil,
+      sounds: sounds,
+      config: config,
+      onChallengeChanged: { [weak self] stepIndex, stepLabel in
+        self?.statusLabel.text = "Step \(stepIndex + 1): \(stepLabel)"
+      },
+      onFaceInOval: { _, _ in },
       onSuccess: { [weak self] data in
         self?.statusLabel.text = "Liveness passed (\(data.count) bytes)"
       },
       onFailure: { [weak self] reason in
-        self?.statusLabel.text = "Failed: \(reason)"
+        let friendly: String
+        if LivenessErrorCodes.isOffline(reason) {
+          friendly = "You're offline. Check your internet connection."
+        } else if LivenessErrorCodes.isCdnNotAvailable(reason) {
+          friendly = "Unable to reach the model host. Please try again later."
+        } else {
+          friendly = "Failed: \(reason)"
+        }
+        self?.statusLabel.text = friendly
       }
     )
   }

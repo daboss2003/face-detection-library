@@ -5,11 +5,12 @@ import android.content.Intent
 import com.facebook.react.bridge.ActivityEventListener
 import com.facebook.react.bridge.BaseActivityEventListener
 import com.facebook.react.bridge.ReadableMap
+import com.facebook.react.bridge.ReadableType
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactMethod
-import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.liveness.detection.LivenessActivity
+import org.json.JSONObject
 
 class LivenessDetectionModule(
   private val reactContext: ReactApplicationContext
@@ -45,8 +46,20 @@ class LivenessDetectionModule(
     }
     pendingPromise = promise
     val modelUrl = options?.getString("modelUrl")
-    val soundBaseUrl = options?.getString("soundBaseUrl")
-    LivenessActivity.startForResult(activity, REQUEST_LIVENESS, modelUrl, soundBaseUrl)
+
+    val soundsJson = when {
+      options?.hasKey("sounds") == true && options.getType("sounds") == ReadableType.Map ->
+        options.getMap("sounds")?.let { readableMapToJson(it).toString() }
+      options?.hasKey("soundBaseUrl") == true ->
+        JSONObject().put("baseUrl", options.getString("soundBaseUrl")).toString()
+      else -> null
+    }
+
+    val configJson = if (options?.hasKey("config") == true && options.getType("config") == ReadableType.Map) {
+      options.getMap("config")?.let { readableMapToJson(it).toString() }
+    } else null
+
+    LivenessActivity.startForResult(activity, REQUEST_LIVENESS, modelUrl, soundsJson, configJson)
   }
 
   @ReactMethod
@@ -56,6 +69,23 @@ class LivenessDetectionModule(
 
   override fun addListener(eventName: String?) {}
   override fun removeListeners(count: Double) {}
+
+  private fun readableMapToJson(map: ReadableMap): JSONObject {
+    val json = JSONObject()
+    val iter = map.keySetIterator()
+    while (iter.hasNextKey()) {
+      val key = iter.nextKey()
+      when (map.getType(key)) {
+        ReadableType.Null -> json.put(key, JSONObject.NULL)
+        ReadableType.Boolean -> json.put(key, map.getBoolean(key))
+        ReadableType.Number -> json.put(key, map.getDouble(key))
+        ReadableType.String -> json.put(key, map.getString(key))
+        ReadableType.Map -> map.getMap(key)?.let { json.put(key, readableMapToJson(it)) }
+        ReadableType.Array -> {}
+      }
+    }
+    return json
+  }
 
   companion object {
     const val NAME = "LivenessDetection"
