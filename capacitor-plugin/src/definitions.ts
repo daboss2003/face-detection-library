@@ -70,6 +70,21 @@ export type LivenessConfigOptions = {
   cdnMaxRetries?: number;
   cdnAttemptTimeoutMs?: number;
   connectivityCheckTimeoutMs?: number;
+
+  // ── UI: shape, theme, layout (mirrors @daboss2003/liveness-web options) ─
+  /** "oval" (default) or "circle". Capacitor renders the camera fullscreen over the WebView. */
+  shape?: "oval" | "circle";
+  /** When false, SDK-rendered instruction text, position hint, gesture icon and step dots are hidden. Sounds still play. */
+  showInstructions?: boolean;
+  /** Minimum diameter (dp on Android, pt on iOS) of the visible face frame. */
+  minSize?: number;
+  /** Ring stroke colour while face is in position. CSS-style hex e.g. "#12c95c" or "#FF12c95c". */
+  progressColor?: string;
+  progressErrorColor?: string;
+  progressWidth?: number;
+  progressLineCap?: "round" | "square" | "butt";
+  overlayColor?: string;
+  overlayErrorColor?: string;
 };
 
 export type LivenessStartOptions = {

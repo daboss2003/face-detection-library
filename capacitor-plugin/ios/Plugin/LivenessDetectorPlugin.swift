@@ -57,13 +57,16 @@ public class LivenessDetectorPlugin: CAPPlugin {
   }
 
   private func parseConfig(call: CAPPluginCall) -> LivenessConfig {
-    var config = LivenessConfig()
+    let config = LivenessConfig()
     guard let dict = call.getObject("config") else { return config }
 
     func f(_ key: String) -> Float? { (dict[key] as? NSNumber)?.floatValue }
+    func cg(_ key: String) -> CGFloat? { (dict[key] as? NSNumber).map { CGFloat($0.doubleValue) } }
     func i64(_ key: String) -> Int64? { (dict[key] as? NSNumber)?.int64Value }
     func i(_ key: String) -> Int? { (dict[key] as? NSNumber)?.intValue }
     func b(_ key: String) -> Bool? { dict[key] as? Bool }
+    func s(_ key: String) -> String? { dict[key] as? String }
+    func color(_ key: String) -> UIColor? { colorFromHexString(dict[key]) }
 
     if let v = i64("readyMs") { config.readyMs = v }
     if let v = i64("sessionTimeoutMs") { config.sessionTimeoutMs = v }
@@ -106,7 +109,38 @@ public class LivenessDetectorPlugin: CAPPlugin {
     if let v = i64("cdnAttemptTimeoutMs") { config.cdnAttemptTimeoutMs = v }
     if let v = i64("connectivityCheckTimeoutMs") { config.connectivityCheckTimeoutMs = v }
 
+    // UI / theme
+    if let v = s("shape") { config.shape = v }
+    if let v = b("showInstructions") { config.showInstructions = v }
+    if let v = cg("minSize") { config.minSize = v }
+    if let v = cg("progressWidth") { config.progressWidth = v }
+    if let v = s("progressLineCap") { config.progressLineCap = v }
+    if let v = color("progressColor") { config.progressColor = v }
+    if let v = color("progressErrorColor") { config.progressErrorColor = v }
+    if let v = color("overlayColor") { config.overlayColor = v }
+    if let v = color("overlayErrorColor") { config.overlayErrorColor = v }
+
     return config
+  }
+
+  private func colorFromHexString(_ value: Any?) -> UIColor? {
+    guard let raw = value as? String else { return nil }
+    let trim = raw.replacingOccurrences(of: "#", with: "")
+    var hex: UInt64 = 0
+    guard Scanner(string: trim).scanHexInt64(&hex) else { return nil }
+    let r, g, b, a: CGFloat
+    if trim.count == 8 {                       // AARRGGBB
+      a = CGFloat((hex >> 24) & 0xFF) / 255
+      r = CGFloat((hex >> 16) & 0xFF) / 255
+      g = CGFloat((hex >> 8)  & 0xFF) / 255
+      b = CGFloat( hex        & 0xFF) / 255
+    } else {                                    // RRGGBB
+      a = 1
+      r = CGFloat((hex >> 16) & 0xFF) / 255
+      g = CGFloat((hex >> 8)  & 0xFF) / 255
+      b = CGFloat( hex        & 0xFF) / 255
+    }
+    return UIColor(red: r, green: g, blue: b, alpha: a)
   }
 
   private func presentLiveness(

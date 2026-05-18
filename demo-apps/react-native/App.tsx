@@ -8,8 +8,15 @@ import {
   LIVENESS_ERROR_OFFLINE,
   startLiveness,
 } from "@daboss/liveness-react-native";
+import EmbedScreen from "./EmbedScreen";
 
 export default function App() {
+  const [route, setRoute] = useState<"home" | "embed">("home");
+  if (route === "embed") return <EmbedScreen onBack={() => setRoute("home")} />;
+  return <HomeScreen onOpenEmbed={() => setRoute("embed")} />;
+}
+
+function HomeScreen({ onOpenEmbed }: { onOpenEmbed: () => void }) {
   const [status, setStatus] = useState("Tap to start liveness (native UI).");
   const [step, setStep] = useState<string | null>(null);
 
@@ -61,6 +68,10 @@ export default function App() {
         </TouchableOpacity>
         {step && <Text style={styles.step}>{step}</Text>}
         <Text style={styles.status}>{status}</Text>
+
+        <TouchableOpacity style={[styles.button, styles.embedButton]} onPress={onOpenEmbed}>
+          <Text style={styles.buttonText}>Try embedded demo</Text>
+        </TouchableOpacity>
       </View>
     </SafeAreaView>
   );
@@ -74,4 +85,5 @@ const styles = StyleSheet.create({
   buttonText: { color: "#fff", fontSize: 16, fontWeight: "600" },
   step: { marginTop: 24, fontSize: 14, color: "#555" },
   status: { marginTop: 12, fontSize: 15, textAlign: "center" },
+  embedButton: { backgroundColor: "#1a0f4d", marginTop: 32 },
 });

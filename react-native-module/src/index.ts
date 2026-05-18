@@ -10,6 +10,8 @@ import type {
   LivenessStartOptions,
 } from "./NativeLivenessDetection";
 export { LivenessWebView } from "./LivenessWebView";
+export { LivenessView } from "./LivenessView";
+export type { LivenessViewProps } from "./LivenessView";
 export {
   LIVENESS_ERROR_CDN_NOT_AVAILABLE,
   LIVENESS_ERROR_OFFLINE,

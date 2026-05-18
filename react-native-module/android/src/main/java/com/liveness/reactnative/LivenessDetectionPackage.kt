@@ -15,7 +15,7 @@ class LivenessDetectionPackage : TurboReactPackage() {
     }
 
   override fun getViewManagers(reactContext: ReactApplicationContext): List<ViewManager<*, *>> {
-    return emptyList()
+    return listOf(LivenessViewManager())
   }
 
   override fun getReactModuleInfoProvider(): ReactModuleInfoProvider {

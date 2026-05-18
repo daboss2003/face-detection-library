@@ -98,7 +98,11 @@ Aborts an in-flight session (best-effort; the native controller may still be dis
 
 Every key is optional; omit to use web-SDK-parity defaults.
 
-`readyMs`, `sessionTimeoutMs`, `baselineFrames`, `yawTurnDelta`, `yawWrongDirDelta`, `headTurnHoldMs`, `nodDownDelta`, `nodReturnFraction`, `nodReturnMaxDelta`, `blinkClosedThreshold`, `blinkOpenThreshold`, `earClosedThreshold`, `earOpenThreshold`, `blinkMaxDurationMs`, `mouthOpenThreshold`, `mouthOpenMarThreshold`, `mouthHoldMs`, `maxYawDuringBlink`, `maxPitchDuringBlink`, `maxYawDuringNod`, `maxYawDuringMouth`, `maxPitchDuringMouth`, `ovalCx`, `ovalCy`, `ovalRx`, `ovalRy`, `minFaceSize`, `maxFaceSize`, `captureDelayMs`, `captureMaxAttempts`, `captureMaxYaw`, `captureMaxPitch`, `captureMaxMouthScore`, `captureMaxBlinkScore`, `captureMinEar`, `captureMaxMar`, `shuffleSteps`, `cdnMaxRetries`, `cdnAttemptTimeoutMs`, `connectivityCheckTimeoutMs`.
+**Tuning / behaviour:** `readyMs`, `sessionTimeoutMs`, `baselineFrames`, `yawTurnDelta`, `yawWrongDirDelta`, `headTurnHoldMs`, `nodDownDelta`, `nodReturnFraction`, `nodReturnMaxDelta`, `blinkClosedThreshold`, `blinkOpenThreshold`, `earClosedThreshold`, `earOpenThreshold`, `blinkMaxDurationMs`, `mouthOpenThreshold`, `mouthOpenMarThreshold`, `mouthHoldMs`, `maxYawDuringBlink`, `maxPitchDuringBlink`, `maxYawDuringNod`, `maxYawDuringMouth`, `maxPitchDuringMouth`, `ovalCx`, `ovalCy`, `ovalRx`, `ovalRy`, `minFaceSize`, `maxFaceSize`, `captureDelayMs`, `captureMaxAttempts`, `captureMaxYaw`, `captureMaxPitch`, `captureMaxMouthScore`, `captureMaxBlinkScore`, `captureMinEar`, `captureMaxMar`, `shuffleSteps`, `cdnMaxRetries`, `cdnAttemptTimeoutMs`, `connectivityCheckTimeoutMs`.
+
+**UI / theme:** `shape` (`"oval"` or `"circle"`), `showInstructions`, `minSize`, `progressColor`, `progressErrorColor`, `progressWidth`, `progressLineCap`, `overlayColor`, `overlayErrorColor`. Colours are CSS-style hex strings (`"#12c95c"` or `"#FF12c95c"`).
+
+> Capacitor renders the camera full-screen over the WebView. If you need the camera _embedded_ inside an HTML slot (like the screenshot demo for the web SDK), use [`@daboss2003/liveness-web`](../web-sdk/) directly from your Capacitor app's WebView — its `embed` mode is the right tool for that layout.
 
 ## Example
 

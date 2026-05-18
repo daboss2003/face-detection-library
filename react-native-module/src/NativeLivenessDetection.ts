@@ -73,6 +73,26 @@ export type LivenessConfigOptions = {
   cdnMaxRetries?: number;
   cdnAttemptTimeoutMs?: number;
   connectivityCheckTimeoutMs?: number;
+
+  // ── UI: shape, theme, layout (mirrors @daboss2003/liveness-web options) ─
+  /** "oval" (default) or "circle". */
+  shape?: "oval" | "circle";
+  /** When false, SDK-rendered instruction text, position hint, gesture icon and step dots are hidden. Sounds still play. */
+  showInstructions?: boolean;
+  /** Minimum diameter (dp on Android, pt on iOS) of the visible face frame, so it stays usable on small screens. */
+  minSize?: number;
+  /** Ring stroke colour while face is in position. CSS-style hex e.g. "#12c95c" or "#FF12c95c" (ARGB on Android). */
+  progressColor?: string;
+  /** Ring stroke colour while face is out of position. */
+  progressErrorColor?: string;
+  /** Ring stroke width (dp on Android, pt on iOS). */
+  progressWidth?: number;
+  /** "round", "square" or "butt". */
+  progressLineCap?: "round" | "square" | "butt";
+  /** Mask fill outside the cutout while face is in position. */
+  overlayColor?: string;
+  /** Mask fill outside the cutout while face is out of position. */
+  overlayErrorColor?: string;
 };
 
 export type LivenessStartOptions = {
