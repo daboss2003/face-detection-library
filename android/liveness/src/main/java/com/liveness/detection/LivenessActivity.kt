@@ -2,28 +2,24 @@ package com.liveness.detection
 
 import android.app.Activity
 import android.content.Intent
+import android.graphics.Color
 import android.os.Bundle
 import android.util.Base64
-import android.view.View
-import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
-import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import org.json.JSONObject
 
 /**
  * Full-screen liveness UI owned by the SDK. Start with [startForResult];
  * receive result in onActivityResult (RESULT_OK + [EXTRA_IMAGE_BASE64], or RESULT_CANCELED + [EXTRA_FAILURE_REASON]).
+ *
+ * For embedded usage (rendering the camera inside your own UI), use [LivenessView] directly
+ * instead of launching this Activity.
  */
 class LivenessActivity : AppCompatActivity(), LivenessListener {
 
-  private lateinit var previewView: PreviewView
-  private lateinit var overlayView: LivenessOvalOverlayView
-  private lateinit var instructionText: TextView
-  private lateinit var posHintText: TextView
-  private lateinit var hintView: LivenessHintView
+  private lateinit var livenessView: LivenessView
 
-  private var detector: LivenessDetector? = null
   private var modelUrl: String? = null
   private var soundsJson: String? = null
   private var configJson: String? = null
@@ -31,107 +27,53 @@ class LivenessActivity : AppCompatActivity(), LivenessListener {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     setContentView(R.layout.activity_liveness)
-    previewView = findViewById(R.id.liveness_preview)
-    overlayView = findViewById(R.id.liveness_overlay)
-    instructionText = findViewById(R.id.liveness_instruction)
-    posHintText = findViewById(R.id.liveness_pos_hint)
-    hintView = findViewById(R.id.liveness_hint)
+    livenessView = findViewById(R.id.liveness_view)
 
     modelUrl = intent.getStringExtra(EXTRA_MODEL_URL) ?: ModelDownloader.DEFAULT_MODEL_URL
     soundsJson = intent.getStringExtra(EXTRA_SOUNDS_JSON)
     configJson = intent.getStringExtra(EXTRA_CONFIG_JSON)
 
+    livenessView.modelUrl = modelUrl
+    livenessView.sounds = parseSounds(soundsJson)
+    livenessView.config = parseConfig(configJson)
+    livenessView.listener = this
+
     if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.CAMERA) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
       requestPermissions(arrayOf(android.Manifest.permission.CAMERA), REQUEST_CAMERA)
       return
     }
-    startDetection()
+    livenessView.start(this)
   }
 
   override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
     super.onRequestPermissionsResult(requestCode, permissions, grantResults)
     if (requestCode == REQUEST_CAMERA && grantResults.isNotEmpty() && grantResults[0] == android.content.pm.PackageManager.PERMISSION_GRANTED) {
-      startDetection()
+      livenessView.start(this)
     } else {
       setFailureResult("Camera permission required")
       finish()
     }
   }
 
-  private fun startDetection() {
-    val sounds = parseSounds(soundsJson)
-    val config = parseConfig(configJson)
-    val url = modelUrl ?: ModelDownloader.DEFAULT_MODEL_URL
-    instructionText.text = "Downloading model..."
-    ModelDownloader.downloadIfNeeded(
-      context = this,
-      url = url,
-      fileName = "face_landmarker.task",
-      maxAttempts = config.cdnMaxRetries,
-      attemptTimeoutMs = config.cdnAttemptTimeoutMs.toInt(),
-      connectivityCheckTimeoutMs = config.connectivityCheckTimeoutMs.toInt(),
-      onSuccess = { file ->
-        runOnUiThread {
-          instructionText.text = "Position your face in the oval"
-          detector = LivenessDetector(this, this, config, sounds).apply {
-            startLiveness(this@LivenessActivity, previewView, true, ModelSource.FilePath(file.absolutePath))
-          }
-        }
-      },
-      onError = { error ->
-        runOnUiThread {
-          setFailureResult(error)
-          finish()
-        }
-      }
-    )
-  }
-
   override fun onPause() {
-    detector?.stop()
-    detector = null
+    livenessView.stop()
     super.onPause()
   }
 
-  override fun onChallengeChanged(stepIndex: Int, stepLabel: String) {
-    runOnUiThread {
-      instructionText.text = stepLabel
-      if (stepIndex >= 0) {
-        overlayView.setProgress(stepIndex)
-        overlayView.setStepDots(stepIndex)
-        hintView.setHint(stepLabel)
-      } else {
-        overlayView.setProgress(5)
-        overlayView.setStepDots(5)
-        hintView.setHint(null)
-      }
-    }
-  }
-
-  override fun onFaceInOval(inside: Boolean, reason: String?) {
-    runOnUiThread {
-      overlayView.setFaceInOval(inside)
-      posHintText.visibility = if (inside) View.GONE else View.VISIBLE
-      posHintText.text = reason ?: ""
-    }
-  }
+  override fun onChallengeChanged(stepIndex: Int, stepLabel: String) {}
+  override fun onFaceInOval(inside: Boolean, reason: String?) {}
+  override fun onFaceDetected(boundingBox: android.graphics.RectF?) {}
 
   override fun onLivenessPassed(imageBytes: ByteArray) {
-    runOnUiThread {
-      val base64 = Base64.encodeToString(imageBytes, Base64.NO_WRAP)
-      setResult(RESULT_OK, Intent().putExtra(EXTRA_IMAGE_BASE64, base64))
-      finish()
-    }
+    val base64 = Base64.encodeToString(imageBytes, Base64.NO_WRAP)
+    setResult(RESULT_OK, Intent().putExtra(EXTRA_IMAGE_BASE64, base64))
+    finish()
   }
 
   override fun onFailure(reason: String) {
-    runOnUiThread {
-      setFailureResult(reason)
-      finish()
-    }
+    setFailureResult(reason)
+    finish()
   }
-
-  override fun onFaceDetected(boundingBox: android.graphics.RectF?) {}
 
   private fun setFailureResult(reason: String) {
     setResult(RESULT_CANCELED, Intent().putExtra(EXTRA_FAILURE_REASON, reason))
@@ -163,6 +105,12 @@ class LivenessActivity : AppCompatActivity(), LivenessListener {
       fun l(k: String, default: Long): Long = if (c.has(k)) c.optLong(k, default) else default
       fun i(k: String, default: Int): Int = if (c.has(k)) c.optInt(k, default) else default
       fun b(k: String, default: Boolean): Boolean = if (c.has(k)) c.optBoolean(k, default) else default
+      fun s(k: String, default: String): String = if (c.has(k) && !c.isNull(k)) c.optString(k, default) else default
+      fun color(k: String, default: Int): Int =
+        if (c.has(k) && !c.isNull(k)) {
+          try { Color.parseColor(c.optString(k)) } catch (_: Exception) { default }
+        } else default
+
       LivenessConfig(
         readyMs = l("readyMs", d.readyMs),
         sessionTimeoutMs = l("sessionTimeoutMs", d.sessionTimeoutMs),
@@ -204,6 +152,15 @@ class LivenessActivity : AppCompatActivity(), LivenessListener {
         cdnMaxRetries = i("cdnMaxRetries", d.cdnMaxRetries),
         cdnAttemptTimeoutMs = l("cdnAttemptTimeoutMs", d.cdnAttemptTimeoutMs),
         connectivityCheckTimeoutMs = l("connectivityCheckTimeoutMs", d.connectivityCheckTimeoutMs),
+        shape = s("shape", d.shape),
+        showInstructions = b("showInstructions", d.showInstructions),
+        minSizeDp = f("minSizeDp", d.minSizeDp),
+        progressColor = color("progressColor", d.progressColor),
+        progressErrorColor = color("progressErrorColor", d.progressErrorColor),
+        progressWidthDp = f("progressWidthDp", d.progressWidthDp),
+        progressLineCap = s("progressLineCap", d.progressLineCap),
+        overlayColor = color("overlayColor", d.overlayColor),
+        overlayErrorColor = color("overlayErrorColor", d.overlayErrorColor),
       )
     } catch (_: Exception) { LivenessConfig() }
   }

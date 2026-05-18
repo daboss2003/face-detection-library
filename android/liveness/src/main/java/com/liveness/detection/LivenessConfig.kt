@@ -1,5 +1,7 @@
 package com.liveness.detection
 
+import android.graphics.Color
+
 data class LivenessConfig(
   val readyMs: Long = 1800L,
   val sessionTimeoutMs: Long = 120000L,
@@ -44,4 +46,24 @@ data class LivenessConfig(
   val cdnMaxRetries: Int = 5,
   val cdnAttemptTimeoutMs: Long = 45000L,
   val connectivityCheckTimeoutMs: Long = 5000L,
+
+  // ── UI: shape, theme, layout (mirrors @daboss2003/liveness-web options) ───
+  /** "oval" (default) or "circle". */
+  val shape: String = "oval",
+  /** When false, SDK-rendered instruction text, position hint, gesture icon and step dots are hidden. Sounds still play. */
+  val showInstructions: Boolean = true,
+  /** Minimum diameter (dp) of the visible face frame, so it stays usable on small screens. 0 = no floor. */
+  val minSizeDp: Float = 220f,
+  /** Ring stroke colour while face is in position. */
+  val progressColor: Int = Color.parseColor("#12c95c"),
+  /** Ring stroke colour while face is out of position. */
+  val progressErrorColor: Int = Color.parseColor("#ff3b3b"),
+  /** Ring stroke width in dp. */
+  val progressWidthDp: Float = 3.5f,
+  /** "round", "square" or "butt". */
+  val progressLineCap: String = "round",
+  /** Mask fill colour outside the cutout while face is in position. ARGB int. */
+  val overlayColor: Int = 0xD1000000.toInt(),
+  /** Mask fill colour outside the cutout while face is out of position. */
+  val overlayErrorColor: Int = 0x8C000000.toInt(),
 )

@@ -19,4 +19,11 @@
         android:layout_marginTop="16dp"
         android:text="Tap to start liveness (SDK-owned UI)"
         android:textSize="14sp" />
+
+    <Button
+        android:id="@+id/embedButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="32dp"
+        android:text="Try embedded demo" />
 </LinearLayout>

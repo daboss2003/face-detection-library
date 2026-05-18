@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 @objc public final class LivenessConfig: NSObject {
   @objc public var readyMs: Int64 = 1800
@@ -46,6 +47,26 @@ import Foundation
   @objc public var cdnMaxRetries: Int = 5
   @objc public var cdnAttemptTimeoutMs: Int64 = 45000
   @objc public var connectivityCheckTimeoutMs: Int64 = 5000
+
+  // ── UI: shape, theme, layout (mirrors @daboss2003/liveness-web options) ───
+  /// "oval" (default) or "circle".
+  @objc public var shape: String = "oval"
+  /// When false, SDK-rendered instruction text, position hint, gesture icon and step dots are hidden. Sounds still play.
+  @objc public var showInstructions: Bool = true
+  /// Minimum diameter (pt) of the visible face frame so it stays usable on small screens. 0 = no floor.
+  @objc public var minSize: CGFloat = 220
+  /// Ring stroke colour while face is in position.
+  @objc public var progressColor: UIColor = UIColor(red: 18/255, green: 201/255, blue: 92/255, alpha: 1)
+  /// Ring stroke colour while face is out of position.
+  @objc public var progressErrorColor: UIColor = UIColor(red: 1, green: 59/255, blue: 59/255, alpha: 1)
+  /// Ring stroke width in pt.
+  @objc public var progressWidth: CGFloat = 3.5
+  /// "round", "square" or "butt".
+  @objc public var progressLineCap: String = "round"
+  /// Mask fill colour outside the cutout while face is in position.
+  @objc public var overlayColor: UIColor = UIColor(white: 0, alpha: 0.82)
+  /// Mask fill colour outside the cutout while face is out of position.
+  @objc public var overlayErrorColor: UIColor = UIColor(red: 180/255, green: 0, blue: 0, alpha: 0.55)
 
   @objc public override init() {
     super.init()

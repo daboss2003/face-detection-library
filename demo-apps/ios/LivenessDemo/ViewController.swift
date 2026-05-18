@@ -4,6 +4,7 @@ import LivenessDetection
 final class ViewController: UIViewController {
   private let startButton = UIButton(type: .system)
   private let statusLabel = UILabel()
+  private let embedButton = UIButton(type: .system)
 
   override func viewDidLoad() {
     super.viewDidLoad()
@@ -18,8 +19,13 @@ final class ViewController: UIViewController {
     statusLabel.numberOfLines = 0
     statusLabel.translatesAutoresizingMaskIntoConstraints = false
 
+    embedButton.setTitle("Try embedded demo", for: .normal)
+    embedButton.translatesAutoresizingMaskIntoConstraints = false
+    embedButton.addTarget(self, action: #selector(embedTapped), for: .touchUpInside)
+
     view.addSubview(startButton)
     view.addSubview(statusLabel)
+    view.addSubview(embedButton)
 
     NSLayoutConstraint.activate([
       startButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
@@ -28,7 +34,16 @@ final class ViewController: UIViewController {
       statusLabel.topAnchor.constraint(equalTo: startButton.bottomAnchor, constant: 16),
       statusLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
       statusLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
+
+      embedButton.topAnchor.constraint(equalTo: statusLabel.bottomAnchor, constant: 32),
+      embedButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
     ])
+  }
+
+  @objc private func embedTapped() {
+    let vc = EmbedViewController()
+    vc.modalPresentationStyle = .fullScreen
+    present(vc, animated: true)
   }
 
   @objc private func startTapped() {

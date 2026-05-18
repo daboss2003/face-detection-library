@@ -14,6 +14,7 @@ class MainActivity : AppCompatActivity() {
 
   private lateinit var startButton: Button
   private lateinit var statusText: TextView
+  private lateinit var embedButton: Button
 
   private val livenessLauncher = registerForActivityResult(
     ActivityResultContracts.StartActivityForResult()
@@ -38,6 +39,11 @@ class MainActivity : AppCompatActivity() {
     setContentView(R.layout.activity_main)
     startButton = findViewById(R.id.startButton)
     statusText = findViewById(R.id.statusText)
+    embedButton = findViewById(R.id.embedButton)
+
+    embedButton.setOnClickListener {
+      startActivity(Intent(this, EmbedActivity::class.java))
+    }
 
     startButton.setOnClickListener {
       statusText.text = "Starting..."
