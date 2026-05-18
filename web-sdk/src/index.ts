@@ -1,7 +1,7 @@
 import { LivenessEngine } from "./engine";
 import { startLivenessWithUI } from "./ui";
 
-export type { StartLivenessOptions } from "./ui";
+export type { StartLivenessOptions, LivenessTheme } from "./ui";
 export {
   DEFAULT_MODEL_URL,
   DEFAULT_WASM_URL,

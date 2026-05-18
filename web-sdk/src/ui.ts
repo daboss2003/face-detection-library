@@ -1,24 +1,45 @@
 import { LivenessEngine, LIVENESS_STEP_COUNT, LivenessCallbacks, LivenessSoundOptions, LivenessError } from "./engine";
 import { DEFAULT_SOUND_DATA_URLS } from "./default-sounds.generated";
 
+export type LivenessTheme = {
+  progressColor?: string;
+  progressErrorColor?: string;
+  progressWidth?: number;
+  progressLineCap?: "round" | "square" | "butt";
+  overlayColor?: string;
+  overlayErrorColor?: string;
+};
+
 export type StartLivenessOptions = {
   container?: HTMLElement;
+  /** If true, render inside `container` instead of taking over the viewport. Container should have explicit width and height. */
+  embed?: boolean;
+  /** Visible face frame shape. Defaults to "oval". */
+  shape?: "oval" | "circle";
+  /** If false, hides SDK-provided instruction text, step dots, position hint, gesture icon and loading text. Sounds still play. Default true. */
+  showInstructions?: boolean;
+  theme?: LivenessTheme;
+  /** Minimum diameter of the visible shape in CSS pixels (so it stays usable on small screens). Default 220. */
+  minSize?: number;
   modelUrl?: string;
   wasmUrl?: string;
   callbacks: LivenessCallbacks;
   sounds?: LivenessSoundOptions;
 };
 
-// ── Oval dimensions — keep in sync with engine.ts config.ovalCx/Cy/Rx/Ry ──
-const OVAL_W = 270;
-const OVAL_H = 360;
-const OVAL_TOP_PCT = 40;
+const DEFAULT_THEME: Required<LivenessTheme> = {
+  progressColor:      "#12c95c",
+  progressErrorColor: "#ff3b3b",
+  progressWidth:      3.5,
+  progressLineCap:    "round",
+  overlayColor:       "rgba(0,0,0,0.82)",
+  overlayErrorColor:  "rgba(180,0,0,0.55)",
+};
+const DEFAULT_MIN_SIZE = 220;
 
-// Progress stroke sits on the main oval: ellipse inset by half stroke so outer edge aligns with cutout
-const STROKE_HALF = 1.75;
-const RX = OVAL_W / 2 - STROKE_HALF;
-const RY = OVAL_H / 2 - STROKE_HALF;
-const ELLIPSE_PERIMETER = Math.PI * (3 * (RX + RY) - Math.sqrt((3 * RX + RY) * (RX + 3 * RY)));
+// Max radii (in CSS px) of the visible shape's cutout — see ─KEY DESIGN note below.
+const OVAL_BASE   = { w: 270, h: 360 };
+const CIRCLE_BASE = 270;
 
 type HintKind = "left" | "blink" | "right" | "nod" | "mouth";
 
@@ -31,35 +52,56 @@ const STEP_LABEL_TO_HINT: Record<string, HintKind> = {
   "Open your mouth":      "mouth",
 };
 
+type StyleConfig = {
+  embed:            boolean;
+  showInstructions: boolean;
+  theme:            Required<LivenessTheme>;
+  minRadius:        number;
+  dims:             { wMax: number; hMax: number; aspectH: number };
+  ovalTopPct:       number;
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles
+//
+// KEY DESIGN: `--oval-w` and `--oval-h` are RADII (not full dimensions) of the
+// visible cutout, because the CSS radial-gradient mask consumes them as
+// `ellipse <hRadius> <vRadius>`. The SVG ring wrapper is therefore sized to
+// `2 * var(--oval-w)` × `2 * var(--oval-h)` so it aligns to the cutout edge.
 // ─────────────────────────────────────────────────────────────────────────────
 
-function createStyles(): HTMLStyleElement {
+function createStyles(cfg: StyleConfig): HTMLStyleElement {
+  const { embed, theme, minRadius, dims, ovalTopPct } = cfg;
+  const sizeUnit  = embed ? "cqmin" : "vmin";
+  const pulseHi   = (theme.progressWidth * 10 / 7).toFixed(2); // ~1.43× — preserves 3.5→5 ratio of the original
   const s = document.createElement("style");
   s.textContent = `
-    :root {
-      --lv-green: #12c95c;
-      --lv-red:   #ff3b3b;
-      --lv-white: #ffffff;
-      --lv-dark:  rgba(0,0,0,0.82);
+    .lv-outer {
+      position: absolute;
+      inset: 0;
+      container-type: size;
+      overflow: hidden;
     }
 
     .lv-root {
-      position: fixed;
+      position: ${embed ? "absolute" : "fixed"};
       inset: 0;
-      z-index: 999999;
-      background: #000;
+      z-index: ${embed ? "1" : "999999"};
+      background: ${embed ? "transparent" : "#000"};
       font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
-      color: var(--lv-white);
+      color: #ffffff;
       overflow: hidden;
       display: flex;
       flex-direction: column;
       align-items: center;
-      /* Radii: keep oval inside viewport on mobile (diameter = 2× this), cap at desktop */
-      --oval-w: min(45vmin, ${OVAL_W}px);
-      --oval-h: min(60vmin, ${OVAL_H}px);
-      /* Half-height of the visible oval for positioning (oval uses full w/h as radii) */
+
+      --lv-progress:       ${theme.progressColor};
+      --lv-progress-error: ${theme.progressErrorColor};
+      --lv-overlay:        ${theme.overlayColor};
+      --lv-overlay-error:  ${theme.overlayErrorColor};
+
+      --oval-w: clamp(${minRadius}px, 45${sizeUnit}, ${dims.wMax}px);
+      --oval-h: calc(var(--oval-w) * ${dims.aspectH});
       --oval-half-h: var(--oval-h);
     }
 
@@ -73,15 +115,12 @@ function createStyles(): HTMLStyleElement {
       overflow: hidden;
     }
     .lv-video {
-      /* Fill the container while keeping aspect ratio */
       width: 100%;
       height: 100%;
       object-fit: cover;
-      /* Mirror so it feels like a selfie camera */
       transform: scaleX(-1);
       opacity: 0;
       transition: opacity 0.2s ease;
-      /* Clip the video to the oval using clip-path on the parent */
     }
     .lv-video.is-playing { opacity: 1; }
     .lv-video::-webkit-media-controls,
@@ -103,25 +142,35 @@ function createStyles(): HTMLStyleElement {
       pointer-events: none;
     }
     .lv-root:not(.lv-is-loading) .lv-loading { display: none; }
+
+    /* When the host owns instructions, hide every SDK label/animation. Sounds + ring stay. */
+    .lv-root.lv-no-instructions .lv-loading,
+    .lv-root.lv-no-instructions .lv-dots,
+    .lv-root.lv-no-instructions .lv-instruction,
+    .lv-root.lv-no-instructions .lv-pos-hint,
+    .lv-root.lv-no-instructions .lv-hint-icon {
+      display: none !important;
+    }
+
     .lv-loading {
       position: absolute;
       z-index: 2;
       left: 50%;
-      top: ${OVAL_TOP_PCT}%;
+      top: ${ovalTopPct}%;
       transform: translate(-50%, -50%);
       display: flex;
       flex-direction: column;
       align-items: center;
       gap: 8px;
       text-align: center;
-      color: var(--lv-white);
+      color: #ffffff;
       text-shadow: 0 1px 6px rgba(0,0,0,0.5);
     }
     .lv-spinner {
       width: 32px;
       height: 32px;
       border: 3px solid rgba(255,255,255,0.25);
-      border-top-color: var(--lv-white);
+      border-top-color: #ffffff;
       border-radius: 50%;
       animation: lv-spin 0.9s linear infinite;
     }
@@ -132,35 +181,31 @@ function createStyles(): HTMLStyleElement {
     }
     @keyframes lv-spin { to { transform: rotate(360deg); } }
 
-    /* ── Dark overlay with oval cutout ──────────────────────────────────── */
+    /* ── Dark overlay with shape cutout ────────────────────────────────── */
     .lv-overlay {
       position: absolute;
       inset: 0;
-      /* Ellipse size (radii): full oval w/h so cutout is large; ring is scaled to match */
       --ow: var(--oval-w);
       --oh: var(--oval-h);
-      background: var(--lv-dark);
+      background: var(--lv-overlay);
       -webkit-mask-image: radial-gradient(
-        ellipse var(--ow) var(--oh) at 50% ${OVAL_TOP_PCT}%,
+        ellipse var(--ow) var(--oh) at 50% ${ovalTopPct}%,
         transparent 99%, black 100%
       );
       mask-image: radial-gradient(
-        ellipse var(--ow) var(--oh) at 50% ${OVAL_TOP_PCT}%,
+        ellipse var(--ow) var(--oh) at 50% ${ovalTopPct}%,
         transparent 99%, black 100%
       );
       pointer-events: none;
       transition: background 0.25s;
     }
-    .lv-overlay.out-of-oval {
-      /* Tint red when face isn't in position */
-      background: rgba(180,0,0,0.55);
-    }
+    .lv-overlay.out-of-oval { background: var(--lv-overlay-error); }
 
-    /* ── Oval SVG ring (2× so progress sits on the main oval boundary) ───── */
+    /* ── Progress ring (2× so its stroke sits on the cutout edge) ──────── */
     .lv-ring-wrap {
       position: absolute;
       left: 50%;
-      top: ${OVAL_TOP_PCT}%;
+      top: ${ovalTopPct}%;
       transform: translate(-50%, -50%);
       width: calc(2 * var(--oval-w));
       height: calc(2 * var(--oval-h));
@@ -169,38 +214,20 @@ function createStyles(): HTMLStyleElement {
     .lv-ring-wrap svg { width: 100%; height: 100%; overflow: visible; }
     .lv-ring-progress {
       fill: none;
-      stroke: var(--lv-green);
-      stroke-width: 3.5;
-      stroke-linecap: round;
+      stroke: var(--lv-progress);
+      stroke-width: ${theme.progressWidth};
+      stroke-linecap: ${theme.progressLineCap};
       transition: stroke-dashoffset 0.45s cubic-bezier(.4,0,.2,1), stroke 0.25s;
       transform: rotate(0deg);
       transform-origin: center;
     }
-    .lv-ring-progress.out-of-oval { stroke: var(--lv-red); }
+    .lv-ring-progress.out-of-oval { stroke: var(--lv-progress-error); }
 
-    /* ── Top header bar ──────────────────────────────────────────────────── */
-    .lv-header {
-      position: relative;
-      z-index: 2;
-      width: 100%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 18px 20px 0;
-      gap: 10px;
-    }
-    .lv-header-title {
-      font-size: 15px;
-      font-weight: 600;
-      letter-spacing: 0.02em;
-      opacity: 0.9;
-    }
-
-    /* ── Step dots ───────────────────────────────────────────────────────── */
+    /* ── Step dots ─────────────────────────────────────────────────────── */
     .lv-dots {
       position: absolute;
       z-index: 2;
-      top: calc(${OVAL_TOP_PCT}% + var(--oval-half-h) + 20px);
+      top: calc(${ovalTopPct}% + var(--oval-half-h) + 20px);
       left: 50%;
       transform: translateX(-50%);
       display: flex;
@@ -211,14 +238,14 @@ function createStyles(): HTMLStyleElement {
       background: rgba(255,255,255,0.2);
       transition: background 0.3s, transform 0.3s;
     }
-    .lv-dot.active { background: var(--lv-green); transform: scale(1.3); }
-    .lv-dot.done  { background: var(--lv-green); opacity: .5; transform: scale(1); }
+    .lv-dot.active { background: var(--lv-progress); transform: scale(1.3); }
+    .lv-dot.done  { background: var(--lv-progress); opacity: .5; transform: scale(1); }
 
-    /* ── Instruction text ────────────────────────────────────────────────── */
+    /* ── Instruction text ──────────────────────────────────────────────── */
     .lv-instruction {
       position: absolute;
       z-index: 2;
-      top: calc(${OVAL_TOP_PCT}% + var(--oval-half-h) + 52px);
+      top: calc(${ovalTopPct}% + var(--oval-half-h) + 52px);
       left: 50%;
       transform: translateX(-50%);
       white-space: nowrap;
@@ -230,16 +257,16 @@ function createStyles(): HTMLStyleElement {
       transition: opacity 0.2s;
     }
 
-    /* ── "Move closer / centre your face" hint ───────────────────────────── */
+    /* ── "Move closer / centre your face" hint ─────────────────────────── */
     .lv-pos-hint {
       position: absolute;
       z-index: 2;
-      top: calc(${OVAL_TOP_PCT}% + var(--oval-half-h) + 84px);
+      top: calc(${ovalTopPct}% + var(--oval-half-h) + 84px);
       left: 50%;
       transform: translateX(-50%);
       font-size: 13px;
       font-weight: 500;
-      color: var(--lv-red);
+      color: var(--lv-progress-error);
       opacity: 0;
       white-space: nowrap;
       text-shadow: 0 1px 6px rgba(0,0,0,0.5);
@@ -248,12 +275,12 @@ function createStyles(): HTMLStyleElement {
     }
     .lv-pos-hint.visible { opacity: 1; }
 
-    /* ── Animated gesture icon ───────────────────────────────────────────── */
+    /* ── Animated gesture icon ─────────────────────────────────────────── */
     .lv-hint-icon {
       position: absolute;
       z-index: 2;
       left: 50%;
-      top: ${OVAL_TOP_PCT}%;
+      top: ${ovalTopPct}%;
       transform: translate(-50%, -50%);
       width: 52px;
       height: 52px;
@@ -265,7 +292,6 @@ function createStyles(): HTMLStyleElement {
     }
     .lv-hint-icon svg { width: 40px; height: 40px; }
 
-    /* Arrow bounce animations */
     @keyframes lv-left  { 0%,100%{transform:translateX(0)}  50%{transform:translateX(-9px)} }
     @keyframes lv-right { 0%,100%{transform:translateX(0)}  50%{transform:translateX(9px)}  }
     @keyframes lv-down  { 0%,100%{transform:translateY(0)}  50%{transform:translateY(8px)}  }
@@ -275,7 +301,7 @@ function createStyles(): HTMLStyleElement {
     }
     @keyframes lv-mouth {
       0%,60%,100% { transform: scaleY(0.35); }
-      30%          { transform: scaleY(1); }
+      30%         { transform: scaleY(1); }
     }
 
     .lv-anim-left  { animation: lv-left  1s ease-in-out infinite; }
@@ -284,14 +310,13 @@ function createStyles(): HTMLStyleElement {
     .lv-eye        { animation: lv-blink 2s ease-in-out infinite; transform-origin: center; }
     .lv-jaw        { animation: lv-mouth 1.5s ease-in-out infinite; transform-origin: top center; }
 
-    /* ── Capture pulse ──────────────────────────────────────────────────── */
+    /* ── Capture pulse ────────────────────────────────────────────────── */
     @keyframes lv-pulse {
-      0%,100% { stroke-width: 3.5; opacity: 1; }
-      50%     { stroke-width: 5;   opacity: 0.55; }
+      0%,100% { stroke-width: ${theme.progressWidth}; opacity: 1; }
+      50%     { stroke-width: ${pulseHi};             opacity: 0.55; }
     }
-    .lv-ring-pulse { animation: lv-pulse 1s ease-in-out infinite; stroke: var(--lv-green) !important; }
+    .lv-ring-pulse { animation: lv-pulse 1s ease-in-out infinite; stroke: var(--lv-progress) !important; }
 
-    /* ── Hidden canvas for capture ───────────────────────────────────────── */
     .lv-canvas {
       position: absolute;
       width: 0; height: 0;
@@ -323,12 +348,54 @@ function hintSvg(kind: HintKind): string {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function startLivenessWithUI(options: StartLivenessOptions): LivenessEngine {
+  const embed            = !!options.embed;
+  const shape            = options.shape ?? "oval";
+  const showInstructions = options.showInstructions ?? true;
+  const theme            = { ...DEFAULT_THEME, ...(options.theme ?? {}) };
+  const minSize          = options.minSize ?? DEFAULT_MIN_SIZE;
+  const minRadius        = Math.max(20, Math.floor(minSize / 2));
+
+  const dims = shape === "circle"
+    ? { wMax: CIRCLE_BASE,   hMax: CIRCLE_BASE,   aspectH: 1 }
+    : { wMax: OVAL_BASE.w,   hMax: OVAL_BASE.h,   aspectH: OVAL_BASE.h / OVAL_BASE.w };
+
+  // When the host owns instructions, the area below the cutout isn't needed,
+  // so we centre the shape vertically. Otherwise keep the original 40% slot.
+  const ovalTopPct = showInstructions ? 40 : 50;
+
+  // Ring geometry derives from dims + stroke width
+  const SVG_W      = dims.wMax;
+  const SVG_H      = dims.hMax;
+  const STROKE_HALF = theme.progressWidth / 2;
+  const RX = SVG_W / 2 - STROKE_HALF;
+  const RY = SVG_H / 2 - STROKE_HALF;
+  const ELLIPSE_PERIMETER = Math.PI * (3 * (RX + RY) - Math.sqrt((3 * RX + RY) * (RX + 3 * RY)));
+
   const container = options.container ?? document.body;
+
+  // ── Mount layer (wrapper only needed for embed so cqmin has a sized container) ──
+  let outerEl: HTMLElement | null = null;
+  let mountPoint: HTMLElement;
+  if (embed) {
+    const computed = getComputedStyle(container);
+    if (computed.position === "static" && container !== document.body) {
+      container.style.position = "relative";
+    }
+    const wrapper = document.createElement("div");
+    wrapper.className = "lv-outer";
+    container.appendChild(wrapper);
+    outerEl    = wrapper;
+    mountPoint = wrapper;
+  } else {
+    mountPoint = container;
+  }
 
   // ── Root shell ─────────────────────────────────────────────────────────────
   const root = document.createElement("div");
-  root.className = "lv-root lv-is-loading";
-  root.appendChild(createStyles());
+  root.className = "lv-root lv-is-loading"
+    + (embed ? " lv-embed" : "")
+    + (!showInstructions ? " lv-no-instructions" : "");
+  root.appendChild(createStyles({ embed, showInstructions, theme, minRadius, dims, ovalTopPct }));
 
   // ── Video background ───────────────────────────────────────────────────────
   const videoBg = document.createElement("div");
@@ -342,17 +409,17 @@ export function startLivenessWithUI(options: StartLivenessOptions): LivenessEngi
   videoBg.appendChild(video);
   root.appendChild(videoBg);
 
-  // ── Dark overlay with oval cutout ──────────────────────────────────────────
+  // ── Dark overlay with shape cutout ─────────────────────────────────────────
   const overlay = document.createElement("div");
   overlay.className = "lv-overlay";
   root.appendChild(overlay);
 
-  // ── Progress ring (ellipse pathLength = perimeter so dash offset matches) ───
-  const rx = OVAL_W / 2, ry = OVAL_H / 2;
+  // ── Progress ring ──────────────────────────────────────────────────────────
+  const rx = SVG_W / 2, ry = SVG_H / 2;
   const ringWrap = document.createElement("div");
   ringWrap.className = "lv-ring-wrap";
   ringWrap.innerHTML = `
-    <svg viewBox="0 0 ${OVAL_W} ${OVAL_H}">
+    <svg viewBox="0 0 ${SVG_W} ${SVG_H}">
       <ellipse class="lv-ring-progress"
         cx="${rx}" cy="${ry}" rx="${RX}" ry="${RY}"
         pathLength="${ELLIPSE_PERIMETER.toFixed(1)}"
@@ -362,13 +429,13 @@ export function startLivenessWithUI(options: StartLivenessOptions): LivenessEngi
     </svg>`;
   root.appendChild(ringWrap);
 
-  // ── Gesture hint icon (inside the oval) ────────────────────────────────────
+  // ── Gesture hint icon ──────────────────────────────────────────────────────
   const hintIcon = document.createElement("div");
   hintIcon.className = "lv-hint-icon";
   hintIcon.setAttribute("aria-hidden", "true");
   root.appendChild(hintIcon);
 
-  // ── Loading spinner (shown until model is ready) ───────────────────────────
+  // ── Loading spinner ────────────────────────────────────────────────────────
   const loading = document.createElement("div");
   loading.className = "lv-loading";
   loading.innerHTML = `
@@ -376,12 +443,6 @@ export function startLivenessWithUI(options: StartLivenessOptions): LivenessEngi
     <div class="lv-loading-text">Preparing camera...</div>
   `;
   root.appendChild(loading);
-
-  // ── Header ─────────────────────────────────────────────────────────────────
-  // const header = document.createElement("div");
-  // header.className = "lv-header";
-  // header.innerHTML = `<span class="lv-header-title">Face Verification</span>`;
-  // root.appendChild(header);
 
   // ── Step dots ──────────────────────────────────────────────────────────────
   const dotsEl = document.createElement("div");
@@ -399,7 +460,7 @@ export function startLivenessWithUI(options: StartLivenessOptions): LivenessEngi
   instruction.textContent = "Position your face in the oval";
   root.appendChild(instruction);
 
-  // ── Position hint (shows when face is out of oval) ─────────────────────────
+  // ── Position hint ──────────────────────────────────────────────────────────
   const posHint = document.createElement("div");
   posHint.className = "lv-pos-hint";
   root.appendChild(posHint);
@@ -409,8 +470,9 @@ export function startLivenessWithUI(options: StartLivenessOptions): LivenessEngi
   canvas.className = "lv-canvas";
   root.appendChild(canvas);
 
-  container.appendChild(root);
+  mountPoint.appendChild(root);
 
+  const topEl = outerEl ?? root;
   const ringEl = ringWrap.querySelector(".lv-ring-progress") as SVGEllipseElement | null;
   const dots = Array.from(dotsEl.querySelectorAll(".lv-dot"));
   const P = ELLIPSE_PERIMETER;
@@ -472,7 +534,7 @@ export function startLivenessWithUI(options: StartLivenessOptions): LivenessEngi
     video.removeEventListener("playing", onVideoPlaying);
     video.removeEventListener("pause", onVideoPause);
     video.removeEventListener("waiting", onVideoPause);
-    root.remove();
+    topEl.remove();
   }
 
   // ── Engine ─────────────────────────────────────────────────────────────────

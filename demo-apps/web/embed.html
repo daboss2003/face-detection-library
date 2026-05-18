@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+    <title>Liveness Embed Demo</title>
+    <style>
+      * { box-sizing: border-box; }
+      html, body { margin: 0; padding: 0; }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", sans-serif;
+        background: #ffd400;
+        color: #111;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 48px 24px 32px;
+      }
+      header {
+        width: 100%;
+        max-width: 360px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 13px;
+        color: rgba(0,0,0,0.5);
+        margin-bottom: 24px;
+      }
+      h1 {
+        font-size: 34px;
+        font-weight: 800;
+        line-height: 1.05;
+        letter-spacing: -0.02em;
+        margin: 8px 0 12px;
+        text-align: center;
+        max-width: 320px;
+      }
+      .sub {
+        font-size: 14px;
+        color: rgba(0,0,0,0.65);
+        max-width: 280px;
+        text-align: center;
+        line-height: 1.45;
+        margin: 0 0 36px;
+      }
+      #slot {
+        position: relative;
+        width: 280px;
+        height: 280px;
+        border-radius: 50%;
+        background: #5b34d6;
+        overflow: hidden;
+        margin-bottom: 28px;
+      }
+      .status {
+        height: 22px;
+        font-size: 14px;
+        font-weight: 500;
+        color: rgba(0,0,0,0.7);
+        margin-bottom: 24px;
+        text-align: center;
+      }
+      .start-btn {
+        background: #1a0f4d;
+        color: #fff;
+        border: none;
+        font-size: 16px;
+        font-weight: 600;
+        padding: 16px 56px;
+        border-radius: 999px;
+        cursor: pointer;
+        min-width: 220px;
+        transition: transform 0.12s ease, opacity 0.2s ease;
+      }
+      .start-btn:disabled { opacity: 0.5; cursor: default; }
+      .start-btn:not(:disabled):active { transform: scale(0.97); }
+    </style>
+  </head>
+  <body>
+    <header>
+      <span>Liveness · Embed</span>
+      <span>Demo</span>
+    </header>
+
+    <h1>Match your BVN photo.</h1>
+    <p class="sub">A quick selfie to match against your BVN photo. Make sure you are in a well-lit room.</p>
+
+    <div id="slot"></div>
+    <div id="status" class="status">Tap start when you're ready.</div>
+    <button id="start" class="start-btn">Start</button>
+
+    <script type="module" src="/src/embed.ts"></script>
+  </body>
+</html>

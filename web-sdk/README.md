@@ -66,6 +66,44 @@ startLiveness({
 });
 ```
 
+## Embedding in your own UI
+
+By default, `startLiveness` takes over the viewport and renders its own oval frame, step dots, and instructions. If you want to drop just the camera + face frame into a slot in your own designed page (custom button, branding, copy), pass:
+
+```ts
+startLiveness({
+  container:        mySlotEl,   // your sized div (give it explicit width & height)
+  embed:            true,       // render inside container instead of full-screen
+  shape:            "circle",   // or "oval" (default)
+  showInstructions: false,      // hide built-in text/dots — your UI shows them
+  minSize:          240,        // floor on shape diameter (px) so small screens stay usable
+  theme: {
+    progressColor:      "#1a0f4d",
+    progressErrorColor: "#ff3b3b",
+    progressWidth:      4,
+    progressLineCap:    "round",
+    overlayColor:       "#5b34d6",          // fill outside the cutout — match your bg
+    overlayErrorColor:  "rgba(180,0,0,0.6)",
+  },
+  callbacks: {
+    onChallengeChanged: (i, label) => myStatus.textContent = label,
+    onFaceInOval:       (inside, reason) => { if (!inside) myStatus.textContent = reason ?? ""; },
+    onSuccess, onFailure,
+  },
+});
+```
+
+Sounds still play in `embed` mode and with `showInstructions: false` — only the visuals are hidden.
+
+A complete working example (yellow page, purple circle slot, host-owned Start button) lives at [`demo-apps/web/embed.html`](../demo-apps/web/embed.html) + [`demo-apps/web/src/embed.ts`](../demo-apps/web/src/embed.ts). Run it with:
+
+```bash
+cd demo-apps/web && npm install && npm run dev
+# open http://localhost:5173/embed.html
+```
+
+All new options are optional — omitting them gives you the original full-screen oval behaviour.
+
 ## Notes
 
 - Uses MediaPipe Tasks Vision Web from CDN.
