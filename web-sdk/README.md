@@ -122,6 +122,42 @@ Valid keys are `"left"`, `"blink"`, `"right"`, `"nod"`, `"mouth"`. Unknown keys 
 
 `shuffleSteps: false` runs the steps in the order you pass.
 
+## Tuning individual steps
+
+Each challenge has its own thresholds — bump them up to be stricter (harder to pass, fewer false positives), or down to be more lenient.
+
+**Blink**
+
+| Field | Default | Effect |
+|---|---|---|
+| `blinkClosedThreshold` | `0.50` | Min blendshape score that counts as "eyes closed". Raise to reject squinting / glare / hooded eyelids; lower if real blinks don't register. Below ~0.35 you start catching passive eye states. |
+| `blinkOpenThreshold`   | `0.25` | Max score that counts as "eyes open". Keep a clear gap from `blinkClosedThreshold`. |
+| `blinkMinClosedMs`     | `60`   | Eyes must stay closed at least this long. Raise to require deliberate (slower) blinks. |
+| `blinkMaxDurationMs`   | `4000` | Abandon and reset if eyes stay closed longer than this. |
+
+**Head turn** — `yawTurnDelta` (degrees needed), `yawWrongDirDelta` (wrong-direction abort), `headTurnHoldMs` (sustain time).
+
+**Nod** — `nodDownDelta` (degrees chin must drop), `nodReturnFraction`, `nodReturnMaxDelta`.
+
+**Mouth** — `mouthOpenThreshold`, `mouthOpenMarThreshold`, `mouthHoldMs`.
+
+**Capture (post-success)** — `captureMaxYaw`, `captureMaxPitch`, `captureMaxMouthScore`, `captureMaxBlinkScore` (all bound how "neutral" the final frame must be).
+
+Pass any subset as part of `config`:
+
+```ts
+startLiveness({
+  config: {
+    blinkClosedThreshold: 0.55,   // tighter blink
+    blinkMinClosedMs:     100,    // require ~6 frames of closure
+    yawTurnDelta:         12,     // looser head turn
+  },
+  callbacks: { /* … */ },
+});
+```
+
+See [`engine.ts`](src/engine.ts) for the full config object and every default value.
+
 ## Notes
 
 - Uses MediaPipe Tasks Vision Web from CDN.

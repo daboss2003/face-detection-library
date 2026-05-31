@@ -151,6 +151,30 @@ final class MyViewController: UIViewController, LivenessDetectorDelegate {
 
 See [`LivenessConfig.swift`](LivenessDetection/LivenessConfig.swift) for exact defaults.
 
+### Tuning individual steps
+
+Each challenge has its own thresholds — bump them up for stricter detection (fewer false positives), down for leniency.
+
+**Blink** — most jitter-prone, the one you're most likely to tune:
+
+| Field | Default | Effect |
+|---|---|---|
+| `blinkClosedThreshold` | `0.50` | Min blendshape score that counts as "eyes closed". Raise to reject squinting / hooded eyelids; lower if real blinks don't register. Below ~0.35 you start catching passive eye states. |
+| `blinkOpenThreshold`   | `0.25` | Max score that counts as "eyes open". Keep a clear gap from closed. |
+| `blinkMinClosedMs`     | `60`   | Eyes must stay closed at least this long. Raise to require slower deliberate blinks. |
+| `blinkMaxDurationMs`   | `4000` | Abandon and reset if eyes stay closed longer than this. |
+
+**Head turn** — `yawTurnDelta`, `yawWrongDirDelta`, `headTurnHoldMs`.
+**Nod** — `nodDownDelta`, `nodReturnFraction`, `nodReturnMaxDelta`.
+**Mouth** — `mouthOpenThreshold`, `mouthOpenMarThreshold`, `mouthHoldMs`.
+
+```swift
+let config = LivenessConfig()
+config.blinkClosedThreshold = 0.55
+config.blinkMinClosedMs     = 100
+config.yawTurnDelta         = 12
+```
+
 ## Error codes
 
 ```swift

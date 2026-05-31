@@ -139,6 +139,33 @@ Every key is optional; omit to use web-SDK-parity defaults.
 
 **Selecting challenges:** pass `steps: ["nod", "blink", "mouth"]` (any subset of `"left" | "blink" | "right" | "nod" | "mouth"`) to run only those. Empty / invalid arrays fall back to all 5. `shuffleSteps` still applies to the selected set.
 
+### Tuning individual steps
+
+Each challenge has its own thresholds — bump them up for stricter detection (fewer false positives), down for leniency.
+
+**Blink** — the one you're most likely to tune:
+
+| Field | Default | Effect |
+|---|---|---|
+| `blinkClosedThreshold` | `0.50` | Min blendshape score that counts as "eyes closed". Raise to reject squinting / hooded eyelids; lower if real blinks don't register. |
+| `blinkOpenThreshold`   | `0.25` | Max score that counts as "eyes open". |
+| `blinkMinClosedMs`     | `60`   | Eyes must stay closed at least this long. Raise to require slower deliberate blinks. |
+| `blinkMaxDurationMs`   | `4000` | Abandon and reset if eyes stay closed longer than this. |
+
+**Head turn** — `yawTurnDelta`, `yawWrongDirDelta`, `headTurnHoldMs`.
+**Nod** — `nodDownDelta`, `nodReturnFraction`, `nodReturnMaxDelta`.
+**Mouth** — `mouthOpenThreshold`, `mouthOpenMarThreshold`, `mouthHoldMs`.
+
+```ts
+await startLiveness({
+  config: {
+    blinkClosedThreshold: 0.55,
+    blinkMinClosedMs:     100,
+    yawTurnDelta:         12,
+  },
+});
+```
+
 **UI / theme** (applies to native modes): `shape` (`"oval"` or `"circle"`), `showInstructions`, `minSize`, `progressColor`, `progressErrorColor`, `progressWidth`, `progressLineCap`, `overlayColor`, `overlayErrorColor`. Colours are CSS-style hex strings (`"#12c95c"` or `"#FF12c95c"`).
 
 ## Sounds
