@@ -8,6 +8,7 @@ import type {
   LivenessResult,
   LivenessSoundOptions,
   LivenessStartOptions,
+  LivenessStepKey,
 } from "./NativeLivenessDetection";
 export { LivenessWebView } from "./LivenessWebView";
 export { LivenessView } from "./LivenessView";
@@ -53,4 +54,5 @@ export type {
   LivenessResult,
   LivenessSoundOptions,
   LivenessStartOptions,
+  LivenessStepKey,
 };

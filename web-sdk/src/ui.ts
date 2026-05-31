@@ -1,4 +1,4 @@
-import { LivenessEngine, LIVENESS_STEP_COUNT, LivenessCallbacks, LivenessSoundOptions, LivenessError } from "./engine";
+import { LivenessEngine, LivenessCallbacks, LivenessSoundOptions, LivenessError, resolveStepLabels, LivenessStepKey } from "./engine";
 import { DEFAULT_SOUND_DATA_URLS } from "./default-sounds.generated";
 
 export type LivenessTheme = {
@@ -25,6 +25,10 @@ export type StartLivenessOptions = {
   wasmUrl?: string;
   callbacks: LivenessCallbacks;
   sounds?: LivenessSoundOptions;
+  /** Subset of challenges to run, e.g. `["nod", "blink", "mouth"]`. Default: all 5. */
+  steps?: LivenessStepKey[];
+  /** Shuffle the selected step order. Default true. */
+  shuffleSteps?: boolean;
 };
 
 const DEFAULT_THEME: Required<LivenessTheme> = {
@@ -445,9 +449,11 @@ export function startLivenessWithUI(options: StartLivenessOptions): LivenessEngi
   root.appendChild(loading);
 
   // ── Step dots ──────────────────────────────────────────────────────────────
+  // Count derives from the active subset (`options.steps`), defaulting to all 5.
+  const sessionStepCount = resolveStepLabels(options.steps).length;
   const dotsEl = document.createElement("div");
   dotsEl.className = "lv-dots";
-  for (let i = 0; i < LIVENESS_STEP_COUNT; i++) {
+  for (let i = 0; i < sessionStepCount; i++) {
     const dot = document.createElement("div");
     dot.className = "lv-dot" + (i === 0 ? " active" : "");
     dotsEl.appendChild(dot);
@@ -483,7 +489,7 @@ export function startLivenessWithUI(options: StartLivenessOptions): LivenessEngi
 
   function setProgress(completedSteps: number): void {
     if (!ringEl) return;
-    const filled = Math.min(completedSteps / LIVENESS_STEP_COUNT, 1);
+    const filled = Math.min(completedSteps / sessionStepCount, 1);
     const offset = P * (1 - filled);
     ringEl.setAttribute("stroke-dashoffset", offset.toFixed(1));
   }
@@ -515,10 +521,10 @@ export function startLivenessWithUI(options: StartLivenessOptions): LivenessEngi
 
   function renderChallenge(stepIndex: number, stepLabel: string): void {
     if (stepIndex === -1) {
-      setProgress(LIVENESS_STEP_COUNT);
+      setProgress(sessionStepCount);
       setCapturePulse();
       setHint(null);
-      setDots(LIVENESS_STEP_COUNT);
+      setDots(sessionStepCount);
       instruction.textContent = stepLabel;
       return;
     }
@@ -555,6 +561,8 @@ export function startLivenessWithUI(options: StartLivenessOptions): LivenessEngi
     modelUrl: options.modelUrl,
     wasmUrl: options.wasmUrl,
     sounds,
+    steps: options.steps,
+    shuffleSteps: options.shuffleSteps,
     callbacks: {
       onChallengeChanged: (stepIndex, stepLabel) => {
         pendingChallenge = { stepIndex, stepLabel };
@@ -574,7 +582,7 @@ export function startLivenessWithUI(options: StartLivenessOptions): LivenessEngi
         options.callbacks.onFailure?.(reason);
       },
       onSuccess: (imageBase64) => {
-        setProgress(LIVENESS_STEP_COUNT);
+        setProgress(sessionStepCount);
         cleanup();
         options.callbacks.onSuccess?.(imageBase64);
       },

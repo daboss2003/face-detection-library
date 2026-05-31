@@ -271,9 +271,14 @@ public extension LivenessDetectorDelegate {
   }
 
   private func buildSteps() -> [LivenessStep] {
-    var list = Array(LivenessStep.allCases)
+    var list = LivenessStep.resolve(keys: config.steps.isEmpty ? nil : config.steps)
     if config.shuffleSteps { list.shuffle() }
     return list
+  }
+
+  /// Number of challenge steps the current session will run (after applying `config.steps`).
+  @objc public var activeStepCount: Int {
+    LivenessStep.resolve(keys: config.steps.isEmpty ? nil : config.steps).count
   }
 
   private func startSessionTimeout() {

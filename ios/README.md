@@ -146,7 +146,7 @@ final class MyViewController: UIViewController, LivenessDetectorDelegate {
 - **Oval**: `ovalCx/Cy/Rx/Ry`, `minFaceSize`, `maxFaceSize`.
 - **Capture**: `captureDelayMs`, `captureMaxAttempts`, `captureMaxYaw`, `captureMaxPitch`, `captureMaxMouthScore`, `captureMaxBlinkScore`, `captureMinEar`, `captureMaxMar`.
 - **Model download**: `cdnMaxRetries`, `cdnAttemptTimeoutMs`, `connectivityCheckTimeoutMs`.
-- **Behaviour**: `shuffleSteps`, `sessionTimeoutMs`.
+- **Behaviour**: `shuffleSteps`, `sessionTimeoutMs`, `steps` (subset of `"left" | "blink" | "right" | "nod" | "mouth"`; default = all 5).
 - **UI / theme**: `shape` (`"oval"` or `"circle"`), `showInstructions`, `minSize`, `progressColor`, `progressErrorColor`, `progressWidth`, `progressLineCap`, `overlayColor`, `overlayErrorColor`.
 
 See [`LivenessConfig.swift`](LivenessDetection/LivenessConfig.swift) for exact defaults.

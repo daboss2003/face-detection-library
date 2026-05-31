@@ -24,7 +24,14 @@ export type LivenessOptions = {
   wasmUrl?: string;
   callbacks?: LivenessCallbacks;
   sounds?: LivenessSoundOptions;
+  /** Subset of challenges to run. Default: all 5. Empty array, duplicates and unknown keys fall back to all 5. */
+  steps?: LivenessStepKey[];
+  /** Shuffle the selected step order. Default true. */
+  shuffleSteps?: boolean;
 };
+
+/** Identifier for a liveness challenge step. Lowercase, matches the sound-key form. */
+export type LivenessStepKey = "left" | "blink" | "right" | "nod" | "mouth";
 
 export const DEFAULT_MODEL_URL =
   "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
@@ -132,22 +139,43 @@ export type Metrics = {
   faceSize:   number;
 };
 
-const STEP_LABELS = [
-  "Turn your head LEFT",
-  "Blink",
-  "Turn your head RIGHT",
-  "Nod your head",
-  "Open your mouth",
+/** Canonical step ordering. Each entry pairs the sound/identifier key with its display label. */
+const STEP_DEFS = [
+  { key: "left",  label: "Turn your head LEFT"  },
+  { key: "blink", label: "Blink"                },
+  { key: "right", label: "Turn your head RIGHT" },
+  { key: "nod",   label: "Nod your head"        },
+  { key: "mouth", label: "Open your mouth"      },
 ] as const;
 
+const STEP_LABELS: readonly string[] = STEP_DEFS.map(s => s.label);
+
+const STEP_KEY_TO_LABEL: Record<LivenessStepKey, string> = STEP_DEFS.reduce(
+  (acc, s) => { (acc as Record<string, string>)[s.key] = s.label; return acc; },
+  {} as Record<LivenessStepKey, string>,
+);
+
 /** Step label → sound key (filename without .mp3). Used so the correct sound plays regardless of randomized step order. */
-const STEP_LABEL_TO_SOUND: Record<string, string> = {
-  "Turn your head LEFT":  "left",
-  "Blink":                "blink",
-  "Turn your head RIGHT": "right",
-  "Nod your head":        "nod",
-  "Open your mouth":      "mouth",
-};
+const STEP_LABEL_TO_SOUND: Record<string, string> = STEP_DEFS.reduce(
+  (acc, s) => { acc[s.label] = s.key; return acc; },
+  {} as Record<string, string>,
+);
+
+/** Resolve a caller-supplied step-key array into the corresponding display labels.
+ *  Empty / undefined / all-invalid → default to all 5 steps. Duplicates are dropped. */
+export function resolveStepLabels(keys?: readonly LivenessStepKey[] | null): string[] {
+  if (!keys || keys.length === 0) return [...STEP_LABELS];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const k of keys) {
+    const label = STEP_KEY_TO_LABEL[k as LivenessStepKey];
+    if (label && !seen.has(label)) {
+      seen.add(label);
+      out.push(label);
+    }
+  }
+  return out.length > 0 ? out : [...STEP_LABELS];
+}
 
 function shuffleArray<T>(array: readonly T[]): T[] {
   const out = [...array];
@@ -158,6 +186,7 @@ function shuffleArray<T>(array: readonly T[]): T[] {
   return out;
 }
 
+/** Default step count (5). The active session may have fewer if `options.steps` is set. */
 export const LIVENESS_STEP_COUNT = STEP_LABELS.length;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -342,10 +371,17 @@ export class LivenessEngine {
 
   // ── Public ─────────────────────────────────────────────────────────────────
 
+  /** Number of challenge steps in the active session (after applying `options.steps`). */
+  get stepCount(): number {
+    return this.steps.length > 0 ? this.steps.length : resolveStepLabels(this.opts.steps).length;
+  }
+
   async start(): Promise<void> {
     this.stopDetectionOnly();
     this.running      = true;
-    this.steps        = shuffleArray(STEP_LABELS).map((label, index) => ({ index, label }));
+    const selected    = resolveStepLabels(this.opts.steps);
+    const ordered     = this.opts.shuffleSteps === false ? selected : shuffleArray(selected);
+    this.steps        = ordered.map((label, index) => ({ index, label }));
     this.stepIndex    = 0;
     this.lastDetectTs = -1;
     this.lastOvalState = null;

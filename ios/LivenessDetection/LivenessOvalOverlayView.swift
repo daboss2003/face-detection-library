@@ -6,11 +6,34 @@ import UIKit
 /// `applyStyle(_:)` using the theme fields in `LivenessConfig`. When `showInstructions`
 /// is false the step dots are hidden (text labels are owned by the parent view).
 public final class LivenessOvalOverlayView: UIView {
-  private static let stepCount = 5
+  private static let defaultStepCount = 5
   // Max radii (pt) — mirrors web SDK's OVAL_BASE / CIRCLE_BASE.
   private static let ovalMaxW: CGFloat = 270
   private static let ovalMaxH: CGFloat = 360
   private static let circleMax: CGFloat = 270
+
+  /// Number of dots/segments rendered for the current session.
+  private var stepCount: Int = LivenessOvalOverlayView.defaultStepCount
+
+  /// Update the rendered step count (set when the engine resolves `config.steps`).
+  public func setStepCount(_ count: Int) {
+    let c = max(1, count)
+    guard stepCount != c else { return }
+    stepCount = c
+    rebuildDots()
+    setNeedsLayout()
+  }
+
+  private func rebuildDots() {
+    for dot in dotLayers { dot.removeFromSuperlayer() }
+    dotLayers.removeAll()
+    for _ in 0..<stepCount {
+      let dot = CAShapeLayer()
+      dot.path = UIBezierPath(ovalIn: CGRect(x: 0, y: 0, width: 7, height: 7)).cgPath
+      layer.addSublayer(dot)
+      dotLayers.append(dot)
+    }
+  }
 
   private let darkLayer = CALayer()
   private let ovalMaskLayer = CAShapeLayer()
@@ -58,12 +81,7 @@ public final class LivenessOvalOverlayView: UIView {
     progressLayer.lineCap = progressLineCap
     progressLayer.strokeColor = progressColor.cgColor
     layer.addSublayer(progressLayer)
-    for _ in 0..<Self.stepCount {
-      let dot = CAShapeLayer()
-      dot.path = UIBezierPath(ovalIn: CGRect(x: 0, y: 0, width: 7, height: 7)).cgPath
-      layer.addSublayer(dot)
-      dotLayers.append(dot)
-    }
+    rebuildDots()
   }
 
   public func applyStyle(_ c: LivenessConfig) {
@@ -103,13 +121,13 @@ public final class LivenessOvalOverlayView: UIView {
 
   public func setProgress(_ completed: Int) {
     guard completedSteps != completed else { return }
-    completedSteps = min(max(completed, 0), Self.stepCount)
+    completedSteps = min(max(completed, 0), stepCount)
     setNeedsLayout()
   }
 
   public func setStepDots(activeIndex: Int) {
     guard activeStepIndex != activeIndex else { return }
-    activeStepIndex = min(max(activeIndex, 0), Self.stepCount - 1)
+    activeStepIndex = min(max(activeIndex, 0), stepCount - 1)
     setNeedsLayout()
   }
 
@@ -146,7 +164,7 @@ public final class LivenessOvalOverlayView: UIView {
     trackLayer.path = UIBezierPath(ovalIn: ovalRect).cgPath
 
     // Approximate progress sweep along the ellipse perimeter
-    let sweep = 2 * CGFloat.pi * (CGFloat(completedSteps) / CGFloat(Self.stepCount))
+    let sweep = 2 * CGFloat.pi * (CGFloat(completedSteps) / CGFloat(stepCount))
     let startAngle = -CGFloat.pi / 2
     let progressPath = UIBezierPath(arcCenter: CGPoint(x: ovalRect.midX, y: ovalRect.midY),
                                     radius: ovalW/2 - progressWidth/2,
@@ -163,7 +181,7 @@ public final class LivenessOvalOverlayView: UIView {
 
     let dotRadius: CGFloat = 3.5
     let dotGap: CGFloat = 8
-    let totalWidth = CGFloat(Self.stepCount) * (dotRadius * 2) + CGFloat(Self.stepCount - 1) * dotGap
+    let totalWidth = CGFloat(stepCount) * (dotRadius * 2) + CGFloat(stepCount - 1) * dotGap
     var dotX = cx - totalWidth/2 + dotRadius
     let dotY = cy + ovalH/2 + 20
     let done = progressColor.withAlphaComponent(0.5).cgColor

@@ -89,12 +89,17 @@ class LivenessView @JvmOverloads constructor(
 
   private fun applyConfig() {
     overlayView.applyStyle(config)
+    overlayView.setStepCount(LivenessStep.resolve(config.steps).size)
     val show = config.showInstructions
     instructionText.visibility = if (show) View.VISIBLE else View.GONE
     hintView.visibility = if (show) View.VISIBLE else View.GONE
     if (!show) posHintText.visibility = View.GONE
     posHintText.setTextColor(config.progressErrorColor)
   }
+
+  /** Number of steps the current session will run (after applying `config.steps`). */
+  val sessionStepCount: Int
+    get() = LivenessStep.resolve(config.steps).size
 
   /**
    * Begin liveness. Camera permission must be granted by the host.
@@ -137,18 +142,17 @@ class LivenessView @JvmOverloads constructor(
   override fun onChallengeChanged(stepIndex: Int, stepLabel: String) {
     post {
       if (config.showInstructions) instructionText.text = stepLabel
+      val total = sessionStepCount
       if (stepIndex >= 0) {
         overlayView.setProgress(stepIndex)
         overlayView.setStepDots(stepIndex)
         hintView.setHint(stepLabel)
       } else {
-        overlayView.setProgress(5)
-        overlayView.setStepDots(5)
+        overlayView.setProgress(total)
+        overlayView.setStepDots(total)
         hintView.setHint(null)
       }
-      // -1 = "Relax and look at the camera" (capture phase). Don't forward as a real step.
-      if (stepIndex >= 0) listener?.onChallengeChanged(stepIndex, stepLabel)
-      else listener?.onChallengeChanged(stepIndex, stepLabel)
+      listener?.onChallengeChanged(stepIndex, stepLabel)
     }
   }
 

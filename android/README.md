@@ -135,7 +135,7 @@ detector.startLiveness(
 - **Oval**: `ovalCx/Cy/Rx/Ry`, `minFaceSize`, `maxFaceSize`.
 - **Capture**: `captureDelayMs`, `captureMaxAttempts`, `captureMaxYaw`, `captureMaxPitch`, `captureMaxMouthScore`, `captureMaxBlinkScore`, `captureMinEar`, `captureMaxMar`.
 - **Model download**: `cdnMaxRetries`, `cdnAttemptTimeoutMs`, `connectivityCheckTimeoutMs`.
-- **Behaviour**: `shuffleSteps`, `sessionTimeoutMs`.
+- **Behaviour**: `shuffleSteps`, `sessionTimeoutMs`, `steps` (subset of `"left" | "blink" | "right" | "nod" | "mouth"`; default = all 5).
 - **UI / theme**: `shape` (`"oval"` or `"circle"`), `showInstructions`, `minSizeDp`, `progressColor`, `progressErrorColor`, `progressWidthDp`, `progressLineCap`, `overlayColor`, `overlayErrorColor`.
 
 See [`LivenessConfig.kt`](liveness/src/main/java/com/liveness/detection/LivenessConfig.kt) for exact defaults.

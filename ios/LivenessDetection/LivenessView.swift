@@ -93,11 +93,17 @@ import UIKit
 
   private func applyConfig() {
     overlayView.applyStyle(config)
+    overlayView.setStepCount(sessionStepCount)
     let show = config.showInstructions
     instructionLabel.isHidden = !show
     hintView.isHidden = !show
     if !show { posHintLabel.isHidden = true }
     posHintLabel.textColor = config.progressErrorColor
+  }
+
+  /// Number of steps the current session will run (after applying `config.steps`).
+  @objc public var sessionStepCount: Int {
+    LivenessStep.resolve(keys: config.steps.isEmpty ? nil : config.steps).count
   }
 
   /// Begin liveness. Camera permission must be granted by the host.
@@ -125,13 +131,14 @@ import UIKit
       if self.config.showInstructions {
         self.instructionLabel.text = stepLabel
       }
+      let total = self.sessionStepCount
       if stepIndex >= 0 {
         self.overlayView.setProgress(stepIndex)
         self.overlayView.setStepDots(activeIndex: stepIndex)
         self.hintView.setHint(stepLabel: stepLabel)
       } else {
-        self.overlayView.setProgress(5)
-        self.overlayView.setStepDots(activeIndex: 5)
+        self.overlayView.setProgress(total)
+        self.overlayView.setStepDots(activeIndex: total)
         self.hintView.setHint(stepLabel: nil)
       }
       self.delegate?.onChallengeChanged(stepIndex: stepIndex, stepLabel: stepLabel)

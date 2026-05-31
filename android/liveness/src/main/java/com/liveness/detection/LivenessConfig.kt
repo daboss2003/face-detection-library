@@ -40,6 +40,12 @@ data class LivenessConfig(
   val captureMinEar: Float = 0.22f,
   val captureMaxMar: Float = 0.22f,
   val shuffleSteps: Boolean = true,
+  /**
+   * Subset of challenges to run, e.g. `listOf("nod", "blink", "mouth")`. Keys are
+   * `"left"`, `"blink"`, `"right"`, `"nod"`, `"mouth"`. `null` or empty = all 5.
+   * Unknown keys are dropped; duplicates de-duped. See [LivenessStep.resolve].
+   */
+  val steps: List<String>? = null,
   val faceDetectionConfidence: Float = 0.5f,
   val facePresenceConfidence: Float = 0.5f,
   val faceTrackingConfidence: Float = 0.5f,

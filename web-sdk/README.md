@@ -104,6 +104,24 @@ cd demo-apps/web && npm install && npm run dev
 
 All new options are optional — omitting them gives you the original full-screen oval behaviour.
 
+## Picking which challenges run
+
+By default, all 5 challenges run in a random order. Pass `steps` to restrict to a subset (e.g. for shorter flows or A/B testing). The dot progress indicator and the progress ring both adjust to the active subset count.
+
+```ts
+import { startLiveness, type LivenessStepKey } from "@daboss2003/liveness-web";
+
+startLiveness({
+  steps: ["nod", "blink", "mouth"],   // run only these, in this set
+  shuffleSteps: true,                 // default true — randomise within the subset
+  callbacks: { /* … */ },
+});
+```
+
+Valid keys are `"left"`, `"blink"`, `"right"`, `"nod"`, `"mouth"`. Unknown keys and duplicates are dropped; an empty array falls back to all 5.
+
+`shuffleSteps: false` runs the steps in the order you pass.
+
 ## Notes
 
 - Uses MediaPipe Tasks Vision Web from CDN.

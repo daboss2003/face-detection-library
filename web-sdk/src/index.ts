@@ -10,9 +10,10 @@ export {
   LIVENESS_STEP_COUNT,
   isCdnNotAvailableError,
   isOfflineError,
+  resolveStepLabels,
   LivenessError,
 } from "./engine";
-export type { LivenessCallbacks, LivenessOptions, LivenessSoundOptions } from "./engine";
+export type { LivenessCallbacks, LivenessOptions, LivenessSoundOptions, LivenessStepKey } from "./engine";
 export type { LivenessEngine } from "./engine";
 
 let currentEngine: LivenessEngine | null = null;

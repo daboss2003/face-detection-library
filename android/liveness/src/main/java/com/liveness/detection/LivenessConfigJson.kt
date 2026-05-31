@@ -1,6 +1,7 @@
 package com.liveness.detection
 
 import android.graphics.Color
+import org.json.JSONArray
 import org.json.JSONObject
 
 /**
@@ -32,6 +33,16 @@ object LivenessConfigJson {
       if (c.has(k) && !c.isNull(k)) {
         try { Color.parseColor(c.optString(k)) } catch (_: Exception) { default }
       } else default
+    fun stringList(k: String, default: List<String>?): List<String>? {
+      if (!c.has(k) || c.isNull(k)) return default
+      val arr = c.optJSONArray(k) ?: return default
+      val out = ArrayList<String>(arr.length())
+      for (i in 0 until arr.length()) {
+        val v = arr.opt(i) ?: continue
+        if (v is String) out.add(v) else out.add(v.toString())
+      }
+      return out
+    }
 
     return LivenessConfig(
       readyMs = l("readyMs", d.readyMs),
@@ -71,6 +82,7 @@ object LivenessConfigJson {
       captureMinEar = f("captureMinEar", d.captureMinEar),
       captureMaxMar = f("captureMaxMar", d.captureMaxMar),
       shuffleSteps = b("shuffleSteps", d.shuffleSteps),
+      steps = stringList("steps", d.steps),
       cdnMaxRetries = i("cdnMaxRetries", d.cdnMaxRetries),
       cdnAttemptTimeoutMs = l("cdnAttemptTimeoutMs", d.cdnAttemptTimeoutMs),
       connectivityCheckTimeoutMs = l("connectivityCheckTimeoutMs", d.connectivityCheckTimeoutMs),

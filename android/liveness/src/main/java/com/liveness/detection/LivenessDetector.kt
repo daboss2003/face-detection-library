@@ -243,10 +243,13 @@ class LivenessDetector(
   }
 
   private fun buildSteps(): List<LivenessStep> {
-    val list = LivenessStep.ordered.toMutableList()
+    val list = LivenessStep.resolve(config.steps).toMutableList()
     if (config.shuffleSteps) list.shuffle()
     return list
   }
+
+  /** Number of challenge steps the current session will run (after applying `config.steps`). */
+  fun activeStepCount(): Int = LivenessStep.resolve(config.steps).size
 
   private fun startSessionTimeout() {
     sessionTimeoutRunnable?.let { mainHandler.removeCallbacks(it) }

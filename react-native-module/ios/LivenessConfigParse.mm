@@ -30,6 +30,14 @@ void LivenessConfigApply(LivenessConfig *config, NSDictionary *c) {
   #define SET_BOOL(key)   { NSNumber *v = c[@#key]; if ([v isKindOfClass:[NSNumber class]]) config.key = v.boolValue; }
   #define SET_STRING(key) { NSString *v = c[@#key]; if ([v isKindOfClass:[NSString class]]) config.key = v; }
   #define SET_COLOR(key)  { UIColor *v = LivenessConfigColorFromHexString(c[@#key]); if (v) config.key = v; }
+  #define SET_STRINGS(key) { \
+    NSArray *raw = c[@#key]; \
+    if ([raw isKindOfClass:[NSArray class]]) { \
+      NSMutableArray<NSString *> *out = [NSMutableArray arrayWithCapacity:raw.count]; \
+      for (id v in raw) { if ([v isKindOfClass:[NSString class]]) [out addObject:v]; } \
+      config.key = out; \
+    } \
+  }
 
   SET_INT64(readyMs) SET_INT64(sessionTimeoutMs) SET_INT(baselineFrames)
   SET_FLOAT(yawTurnDelta) SET_FLOAT(yawWrongDirDelta) SET_INT64(headTurnHoldMs)
@@ -47,6 +55,7 @@ void LivenessConfigApply(LivenessConfig *config, NSDictionary *c) {
   SET_FLOAT(captureMaxMouthScore) SET_FLOAT(captureMaxBlinkScore)
   SET_FLOAT(captureMinEar) SET_FLOAT(captureMaxMar)
   SET_BOOL(shuffleSteps)
+  SET_STRINGS(steps)
   SET_INT(cdnMaxRetries) SET_INT64(cdnAttemptTimeoutMs) SET_INT64(connectivityCheckTimeoutMs)
 
   // UI / theme
@@ -61,6 +70,7 @@ void LivenessConfigApply(LivenessConfig *config, NSDictionary *c) {
   #undef SET_INT
   #undef SET_BOOL
   #undef SET_STRING
+  #undef SET_STRINGS
   #undef SET_COLOR
 }
 

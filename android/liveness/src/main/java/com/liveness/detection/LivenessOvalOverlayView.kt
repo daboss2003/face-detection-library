@@ -25,11 +25,22 @@ class LivenessOvalOverlayView @JvmOverloads constructor(
 ) : View(context, attrs, defStyleAttr) {
 
   companion object {
-    private const val STEP_COUNT = 5
+    private const val DEFAULT_STEP_COUNT = 5
     // Max radii in dp — same semantics as the web SDK's OVAL_BASE / CIRCLE_BASE.
     private const val OVAL_MAX_W_DP = 270f
     private const val OVAL_MAX_H_DP = 360f
     private const val CIRCLE_MAX_DP = 270f
+  }
+
+  /** Number of dots/segments rendered for the current session. */
+  private var stepCount: Int = DEFAULT_STEP_COUNT
+
+  /** Update the rendered step count (set when the engine resolves `config.steps`). */
+  fun setStepCount(count: Int) {
+    val c = count.coerceAtLeast(1)
+    if (stepCount == c) return
+    stepCount = c
+    invalidate()
   }
 
   private val density = context.resources.displayMetrics.density
@@ -86,12 +97,12 @@ class LivenessOvalOverlayView @JvmOverloads constructor(
     }
   var completedSteps = 0
     set(value) {
-      val v = value.coerceIn(0, STEP_COUNT)
+      val v = value.coerceIn(0, stepCount)
       if (field != v) { field = v; invalidate() }
     }
   var activeStepIndex = 0
     set(value) {
-      val v = value.coerceIn(0, STEP_COUNT - 1)
+      val v = value.coerceIn(0, stepCount - 1)
       if (field != v) { field = v; invalidate() }
     }
 
@@ -164,17 +175,17 @@ class LivenessOvalOverlayView @JvmOverloads constructor(
 
     canvas.drawOval(ovalRect, trackPaint)
     val progressPaintToUse = if (faceInOval) progressPaint else progressPaintOutOfOval
-    val sweep = 360f * (completedSteps.toFloat() / STEP_COUNT)
+    val sweep = 360f * (completedSteps.toFloat() / stepCount)
     canvas.drawArc(ovalRect, -90f, sweep, false, progressPaintToUse)
 
     if (!showDots) return
 
     val dotRadius = 3.5f * density
     val dotGap = 8f * density
-    val totalDotsWidth = STEP_COUNT * (dotRadius * 2) + (STEP_COUNT - 1) * dotGap
+    val totalDotsWidth = stepCount * (dotRadius * 2) + (stepCount - 1) * dotGap
     var dotLeft = cx - totalDotsWidth / 2f + dotRadius
     val dotY = cy + ovalH / 2f + 20f * density
-    for (i in 0 until STEP_COUNT) {
+    for (i in 0 until stepCount) {
       val p = when {
         i < activeStepIndex -> dotPaintDone
         i == activeStepIndex -> dotPaintActive

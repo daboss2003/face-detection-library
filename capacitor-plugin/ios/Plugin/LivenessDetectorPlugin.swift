@@ -105,6 +105,9 @@ public class LivenessDetectorPlugin: CAPPlugin {
     if let v = f("captureMinEar") { config.captureMinEar = v }
     if let v = f("captureMaxMar") { config.captureMaxMar = v }
     if let v = b("shuffleSteps") { config.shuffleSteps = v }
+    if let v = dict["steps"] as? [Any] {
+      config.steps = v.compactMap { $0 as? String }
+    }
     if let v = i("cdnMaxRetries") { config.cdnMaxRetries = v }
     if let v = i64("cdnAttemptTimeoutMs") { config.cdnAttemptTimeoutMs = v }
     if let v = i64("connectivityCheckTimeoutMs") { config.connectivityCheckTimeoutMs = v }

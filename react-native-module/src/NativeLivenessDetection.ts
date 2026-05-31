@@ -10,6 +10,9 @@ export type LivenessFailureEvent = {
   reason: string;
 };
 
+/** Identifier for a liveness challenge step. */
+export type LivenessStepKey = "left" | "blink" | "right" | "nod" | "mouth";
+
 export type LivenessFaceInOvalEvent = {
   inside: boolean;
   reason?: string;
@@ -70,6 +73,8 @@ export type LivenessConfigOptions = {
   captureMinEar?: number;
   captureMaxMar?: number;
   shuffleSteps?: boolean;
+  /** Subset of challenges to run, e.g. `["nod", "blink", "mouth"]`. Default: all 5. Empty/invalid → falls back to all 5. */
+  steps?: LivenessStepKey[];
   cdnMaxRetries?: number;
   cdnAttemptTimeoutMs?: number;
   connectivityCheckTimeoutMs?: number;

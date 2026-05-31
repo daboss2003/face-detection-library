@@ -39,6 +39,10 @@ import UIKit
   @objc public var captureMinEar: Float = 0.22
   @objc public var captureMaxMar: Float = 0.22
   @objc public var shuffleSteps: Bool = true
+  /// Subset of challenges to run, e.g. `["nod", "blink", "mouth"]`. Empty = all 5.
+  /// Keys: `"left"`, `"blink"`, `"right"`, `"nod"`, `"mouth"`. Unknown keys dropped;
+  /// duplicates de-duped. See `LivenessStep.resolve(keys:)`.
+  @objc public var steps: [String] = []
 
   @objc public var faceDetectionConfidence: Float = 0.5
   @objc public var facePresenceConfidence: Float = 0.5

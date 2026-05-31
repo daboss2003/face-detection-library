@@ -81,10 +81,25 @@ class LivenessDetectionModule(
         ReadableType.Number -> json.put(key, map.getDouble(key))
         ReadableType.String -> json.put(key, map.getString(key))
         ReadableType.Map -> map.getMap(key)?.let { json.put(key, readableMapToJson(it)) }
-        ReadableType.Array -> {}
+        ReadableType.Array -> map.getArray(key)?.let { json.put(key, readableArrayToJson(it)) }
       }
     }
     return json
+  }
+
+  private fun readableArrayToJson(arr: com.facebook.react.bridge.ReadableArray): org.json.JSONArray {
+    val out = org.json.JSONArray()
+    for (i in 0 until arr.size()) {
+      when (arr.getType(i)) {
+        ReadableType.Null    -> out.put(JSONObject.NULL)
+        ReadableType.Boolean -> out.put(arr.getBoolean(i))
+        ReadableType.Number  -> out.put(arr.getDouble(i))
+        ReadableType.String  -> out.put(arr.getString(i))
+        ReadableType.Map     -> arr.getMap(i)?.let { out.put(readableMapToJson(it)) }
+        ReadableType.Array   -> arr.getArray(i)?.let { out.put(readableArrayToJson(it)) }
+      }
+    }
+    return out
   }
 
   companion object {
