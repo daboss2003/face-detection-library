@@ -168,7 +168,8 @@ export function resolveStepLabels(keys?: readonly LivenessStepKey[] | null): str
   const seen = new Set<string>();
   const out: string[] = [];
   for (const k of keys) {
-    const label = STEP_KEY_TO_LABEL[k as LivenessStepKey];
+    const normalised = (typeof k === "string" ? k.toLowerCase() : "") as LivenessStepKey;
+    const label = STEP_KEY_TO_LABEL[normalised];
     if (label && !seen.has(label)) {
       seen.add(label);
       out.push(label);

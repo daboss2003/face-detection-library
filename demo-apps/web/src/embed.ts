@@ -47,6 +47,7 @@ function run() {
         startBtn.textContent = "Try again";
       },
     },
+    steps: ["blink", 'mouth', 'right']
   });
 }
 
