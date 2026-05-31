@@ -49,6 +49,8 @@ export type LivenessConfigOptions = {
   blinkOpenThreshold?: number;
   earClosedThreshold?: number;
   earOpenThreshold?: number;
+  /** Eyes must be CLOSED for at least this long before a blink counts — filters out single-frame noise. Default 60 ms. */
+  blinkMinClosedMs?: number;
   blinkMaxDurationMs?: number;
   mouthOpenThreshold?: number;
   mouthOpenMarThreshold?: number;

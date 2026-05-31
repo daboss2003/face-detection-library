@@ -8,6 +8,8 @@ class LivenessStateMachine(
   private var stepStartMs: Long = 0L
   private var blinkState = BlinkState.WAITING_FOR_CLOSE
   private var blinkCloseMs: Long = 0L
+  // Gate: must observe at least one isEyeOpen frame before allowing a `closed` transition.
+  private var blinkSeenOpen = false
   private var nodState = NodState.NEUTRAL
   private var holdStartMs: Long? = null
 
@@ -98,18 +100,25 @@ class LivenessStateMachine(
       metrics.avgEar > config.earOpenThreshold
     }
 
+    // Confirm eyes were OPEN before we count any closed → open transition.
+    // Kills the "step starts mid-blink / mid-squint" false positive.
+    if (isEyeOpen) blinkSeenOpen = true
+
     when (blinkState) {
       BlinkState.WAITING_FOR_CLOSE -> {
-        if (isEyeClosed) {
+        if (isEyeClosed && blinkSeenOpen) {
           blinkState = BlinkState.CLOSED
           blinkCloseMs = nowMs
         }
       }
       BlinkState.CLOSED -> {
         if (isEyeOpen) {
-          if (nowMs - blinkCloseMs <= config.blinkMaxDurationMs) {
+          val dt = nowMs - blinkCloseMs
+          if (dt in config.blinkMinClosedMs..config.blinkMaxDurationMs) {
             return advanceStep(nowMs)
           }
+          // Closed phase too short (noise) or too long (eyes never reopened in time) — discard, wait for next attempt.
+          // blinkSeenOpen stays true — we've already confirmed the user can open their eyes.
           blinkState = BlinkState.WAITING_FOR_CLOSE
         }
       }
@@ -170,6 +179,7 @@ class LivenessStateMachine(
   private fun resetStepState() {
     blinkState = BlinkState.WAITING_FOR_CLOSE
     blinkCloseMs = 0L
+    blinkSeenOpen = false
     nodState = NodState.NEUTRAL
     holdStartMs = null
     baselineYaw = null

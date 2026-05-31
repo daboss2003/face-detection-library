@@ -12,10 +12,14 @@ data class LivenessConfig(
   val nodDownDelta: Float = 3f,
   val nodReturnFraction: Float = 0.85f,
   val nodReturnMaxDelta: Float = 12f,
-  val blinkClosedThreshold: Float = 0.30f,
+  // Real blinks easily hit 0.7+. Sustained squinting / glare / hooded eyelids hover at 0.25–0.40 —
+  // keep the "closed" threshold well above that band so passive eye states don't latch CLOSED.
+  val blinkClosedThreshold: Float = 0.50f,
   val blinkOpenThreshold: Float = 0.25f,
   val earClosedThreshold: Float = 0.20f,
   val earOpenThreshold: Float = 0.25f,
+  /** Eyes must be CLOSED for at least this long before a blink counts — filters out single-frame noise. */
+  val blinkMinClosedMs: Long = 60L,
   val blinkMaxDurationMs: Long = 4000L,
   val mouthOpenThreshold: Float = 0.20f,
   val mouthOpenMarThreshold: Float = 0.20f,

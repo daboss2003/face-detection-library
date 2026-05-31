@@ -227,10 +227,13 @@ const config = {
   maxYawDuringNod:        40,
 
   // ── Blink ──────────────────────────────────────────────────────────────────
-  blinkClosedThreshold:  0.30,  // blendshape score = eyes closed
-  blinkOpenThreshold:    0.25,  // blendshape score = eyes open
+  // Real blinks easily hit 0.7+. Sustained squinting / glare / hooded eyelids hover at 0.25–0.40 —
+  // keep the "closed" threshold well above that band so passive eye states don't latch CLOSED.
+  blinkClosedThreshold:  0.50,
+  blinkOpenThreshold:    0.25,
   earClosedThreshold:    0.20,
   earOpenThreshold:      0.25,
+  blinkMinClosedMs:       60,   // eyes must be CLOSED for at least this long — filters out single-frame noise
   blinkMaxDurationMs:   4000,
   maxYawDuringBlink:     30,
   maxPitchDuringBlink:   30,
@@ -282,6 +285,7 @@ export class LivenessEngine {
   // ── Per-step sub-state ─────────────────────────────────────────────────────
   private blinkState:   "waitingClose" | "closed" = "waitingClose";
   private blinkCloseTs  = 0;
+  private blinkSeenOpen = false;  // gate: must observe at least one isEyeOpen frame before allowing a `closed` transition
   private nodState:     "neutral" | "down" = "neutral";
   private holdStart:    number | null = null;
 
@@ -548,6 +552,7 @@ export class LivenessEngine {
   private resetStepState(): void {
     this.blinkState      = "waitingClose";
     this.blinkCloseTs    = 0;
+    this.blinkSeenOpen   = false;
     this.nodState        = "neutral";
     this.holdStart       = null;
     this.baselineYaw     = null;
@@ -603,11 +608,18 @@ export class LivenessEngine {
           ? metrics.blinkScore < config.blinkOpenThreshold
           : metrics.ear > config.earOpenThreshold;
 
-        if (this.blinkState === "waitingClose" && isEyeClosed) {
+        // Confirm eyes were OPEN before we count any closed → open transition.
+        // Kills the "step starts mid-blink / mid-squint" false positive.
+        if (isEyeOpen) this.blinkSeenOpen = true;
+
+        if (this.blinkState === "waitingClose" && isEyeClosed && this.blinkSeenOpen) {
           this.blinkState   = "closed";
           this.blinkCloseTs = now;
         } else if (this.blinkState === "closed" && isEyeOpen) {
-          if (now - this.blinkCloseTs <= config.blinkMaxDurationMs) return this.advanceStep(now);
+          const dt = now - this.blinkCloseTs;
+          if (dt >= config.blinkMinClosedMs && dt <= config.blinkMaxDurationMs) return this.advanceStep(now);
+          // Closed phase too short (noise) or too long (eyes never reopened in time) — discard, wait for next attempt.
+          // blinkSeenOpen stays true — we've already confirmed the user can open their eyes.
           this.blinkState = "waitingClose";
         }
         break;

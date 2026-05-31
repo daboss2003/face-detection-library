@@ -11,10 +11,14 @@ import UIKit
   @objc public var nodDownDelta: Float = 3
   @objc public var nodReturnFraction: Float = 0.85
   @objc public var nodReturnMaxDelta: Float = 12
-  @objc public var blinkClosedThreshold: Float = 0.30
+  // Real blinks easily hit 0.7+. Sustained squinting / glare / hooded eyelids hover at 0.25–0.40 —
+  // keep the "closed" threshold well above that band so passive eye states don't latch CLOSED.
+  @objc public var blinkClosedThreshold: Float = 0.50
   @objc public var blinkOpenThreshold: Float = 0.25
   @objc public var earClosedThreshold: Float = 0.20
   @objc public var earOpenThreshold: Float = 0.25
+  /// Eyes must be CLOSED for at least this long before a blink counts — filters out single-frame noise.
+  @objc public var blinkMinClosedMs: Int64 = 60
   @objc public var blinkMaxDurationMs: Int64 = 4000
   @objc public var mouthOpenThreshold: Float = 0.20
   @objc public var mouthOpenMarThreshold: Float = 0.20

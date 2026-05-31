@@ -81,6 +81,7 @@ public class LivenessDetectorPlugin: CAPPlugin {
     if let v = f("blinkOpenThreshold") { config.blinkOpenThreshold = v }
     if let v = f("earClosedThreshold") { config.earClosedThreshold = v }
     if let v = f("earOpenThreshold") { config.earOpenThreshold = v }
+    if let v = i64("blinkMinClosedMs") { config.blinkMinClosedMs = v }
     if let v = i64("blinkMaxDurationMs") { config.blinkMaxDurationMs = v }
     if let v = f("mouthOpenThreshold") { config.mouthOpenThreshold = v }
     if let v = f("mouthOpenMarThreshold") { config.mouthOpenMarThreshold = v }

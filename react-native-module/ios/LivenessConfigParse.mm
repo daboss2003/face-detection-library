@@ -44,7 +44,7 @@ void LivenessConfigApply(LivenessConfig *config, NSDictionary *c) {
   SET_FLOAT(nodDownDelta) SET_FLOAT(nodReturnFraction) SET_FLOAT(nodReturnMaxDelta)
   SET_FLOAT(blinkClosedThreshold) SET_FLOAT(blinkOpenThreshold)
   SET_FLOAT(earClosedThreshold) SET_FLOAT(earOpenThreshold)
-  SET_INT64(blinkMaxDurationMs)
+  SET_INT64(blinkMinClosedMs) SET_INT64(blinkMaxDurationMs)
   SET_FLOAT(mouthOpenThreshold) SET_FLOAT(mouthOpenMarThreshold) SET_INT64(mouthHoldMs)
   SET_FLOAT(maxYawDuringBlink) SET_FLOAT(maxPitchDuringBlink)
   SET_FLOAT(maxYawDuringNod) SET_FLOAT(maxYawDuringMouth) SET_FLOAT(maxPitchDuringMouth)

@@ -58,6 +58,7 @@ object LivenessConfigJson {
       blinkOpenThreshold = f("blinkOpenThreshold", d.blinkOpenThreshold),
       earClosedThreshold = f("earClosedThreshold", d.earClosedThreshold),
       earOpenThreshold = f("earOpenThreshold", d.earOpenThreshold),
+      blinkMinClosedMs = l("blinkMinClosedMs", d.blinkMinClosedMs),
       blinkMaxDurationMs = l("blinkMaxDurationMs", d.blinkMaxDurationMs),
       mouthOpenThreshold = f("mouthOpenThreshold", d.mouthOpenThreshold),
       mouthOpenMarThreshold = f("mouthOpenMarThreshold", d.mouthOpenMarThreshold),
